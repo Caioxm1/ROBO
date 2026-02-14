@@ -67,7 +67,7 @@ class DataEngine:
         return 0, 0.0, 0.0035
 
     def get_prev_day_close(self, symbol="BOVA11.SA"):
-        [cite_start]"""Busca o refPrice (Fechamento D1, 1) [cite: 555]"""
+        """Busca o refPrice (Fechamento D1, 1)"""
         df = yf.download(symbol, period="5d", interval="1d", progress=False)
         if len(df) >= 2:
             return float(df['Close'].iloc[-2])
@@ -192,3 +192,4 @@ def manage_active_trade(price):
 
 if __name__ == "__main__":
     main()
+
