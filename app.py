@@ -72,49 +72,53 @@ if 'sim_active' not in st.session_state:
 st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
 
 class DataEngine:
-    def get_market_data(self, symbol="WIN=F", interval="1m", n_bars=100):
-        """Busca dados do Yahoo Finance com suporte a fins de semana"""
+    def get_market_data(self, symbol="^BVSP", interval="1m", n_bars=100):
+        """Busca dados do Yahoo Finance com tratamento de MultiIndex"""
         try:
-            # AJUSTE 1: Aumentamos o período para 7 dias (máximo p/ 1m) 
-            # para garantir dados da última sexta-feira no final de semana.
             search_period = '7d' if interval in ['1m', '5m'] else '1mo'
             
-            # AJUSTE 2: Garantir que o interval seja string
-            if not isinstance(interval, str):
-                interval = "1m"
-
+            # Download dos dados
             data = yf.download(
                 tickers=symbol, 
                 period=search_period, 
                 interval=interval, 
                 progress=False,
-                timeout=10 # Evita que o app trave se o Yahoo demorar
+                timeout=15
             )
             
             if data.empty:
-                # Teste com ticker alternativo se WIN=F falhar
-                if symbol == "WIN=F":
-                    st.sidebar.warning(f"Ticker {symbol} falhou. Tentando ^BVSP...")
+                # Se falhar com ^BVSP, tenta automaticamente o Índice Bovespa
+                if symbol != "^BVSP":
                     return self.get_market_data(symbol="^BVSP", interval=interval, n_bars=n_bars)
                 return pd.DataFrame()
+
+            # --- CORREÇÃO DO ERRO DE TUPLE ---
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            data.columns = [str(col).lower() for col in data.columns]
+            # ---------------------------------
             
-            data.columns = [col.lower() for col in data.columns]
             return data.tail(n_bars)
         except Exception as e:
-            st.error(f"Erro Crítico no Yahoo Finance: {e}")
+            st.error(f"Erro no Yahoo Finance: {e}")
             return pd.DataFrame()
 
     def get_macro_prices(self):
-        """Busca preços macro usando Yahoo Finance"""
+        """Busca preços macro tratando as colunas corretamente"""
         macro_results = {}
-        # Mapeamento: Ticker TV -> Ticker Yahoo
-        # S&P500: ^GSPC | DXY: DX-Y.NYB | Treasury: ^TNX
         for ticker in TICKERS_MACRO:
             try:
                 df = yf.download(ticker, period='2d', interval='1d', progress=False)
                 if not df.empty and len(df) >= 2:
-                    close_now = df['Close'].iloc[-1]
-                    close_prev = df['Close'].iloc[-2]
+                    # Garante acesso correto à coluna mesmo com MultiIndex
+                    close_col = ('Close', ticker) if ticker in df.columns else 'Close'
+                    if isinstance(df.columns, pd.MultiIndex):
+                        close_now = df['Close'].iloc[-1].values[0]
+                        close_prev = df['Close'].iloc[-2].values[0]
+                    else:
+                        close_now = df['Close'].iloc[-1]
+                        close_prev = df['Close'].iloc[-2]
+                    
                     macro_results[ticker] = (close_now / close_prev) - 1
             except:
                 macro_results[ticker] = 0.0
@@ -479,15 +483,15 @@ def main():
     engine = DataEngine()
     
     # 2. Correção de tipos: Passando strings diretas para evitar o erro de 'Interval'
-    df_m1 = engine.get_market_data(symbol="WIN=F", interval="1m", n_bars=100)
-    df_m5 = engine.get_market_data(symbol="WIN=F", interval="5m", n_bars=50)
+    df_m1 = engine.get_market_data(symbol="^BVSP", interval="1m", n_bars=100)
+    df_m5 = engine.get_market_data(symbol="^BVSP", interval="5m", n_bars=50)
     macro_changes = engine.get_macro_prices()
     
     # --- AJUSTE DE SEGURANÇA: FALLBACK ---
     if df_m1.empty or df_m5.empty:
         st.warning("📡 Feed Principal indisponível. Tentando redundância...")
         # Agora a função existe!
-        df_m1_alt = get_fallback_data("WIN=F") 
+        df_m1_alt = get_fallback_data("^BVSP") 
         
         if not df_m1_alt.empty:
             df_m1 = df_m1_alt
@@ -600,6 +604,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
