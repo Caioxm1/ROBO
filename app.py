@@ -2,207 +2,583 @@ import streamlit as st
 import pandas as pd
 import pandas_ta as ta
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from tvDatafeed import TvDatafeed, Interval
 import numpy as np
-import yfinance as yf # Importante para a redundância
 
 # =========================================================
-# 1. CONFIGURAÇÕES E ESTADO
+# 1. CONFIGURAÇÕES MACRO (Vindo do Sniper_Data_Feed.py)
 # =========================================================
-BETAS_WIN = {'^GSPC': 1.2, 'USDBRL=X': -1.0, 'USDMXN=X': -0.5, '^TNX': -0.4, 'EWZ': 1.0}
+# Betas de correlação para cálculo do Score Global
+BETAS_WIN = {
+    '^GSPC': 1.2,      # S&P 500
+    'USDBRL=X': -1.0,  # Dólar Real
+    'USDMXN=X': -0.5,  # Dólar Peso Mexicano
+    '^TNX': -0.4,      # Treasury 10Y
+    'EWZ': 1.0         # ETF Brasil
+}
+
 TICKERS_MACRO = list(BETAS_WIN.keys())
 
-INP_TREND_PER, INP_TREND_DEV = 20, 2.0
-INP_ENTRY_PER, INP_ENTRY_DEV = 20, 2.5
-INP_BAND_BUFFER, INP_BREAKOUT = 10, 20
-INP_RSI_PER, INP_RSI_UPPER, INP_RSI_LOWER = 14, 70, 30
-INP_TAKE_POINTS = 1000
-INP_WAIT_CANDLES = 1
-INP_MIN_SCORE_TRADE = 2
+# =========================================================
+# 2. INPUTS DO SISTEMA (Espelhados do WIN.txt)
+# =========================================================
+INP_TREND_TF    = "5m"      # Timeframe de Tendência (M5)
+INP_TREND_PER   = 20        # Período Bollinger M5
+INP_TREND_DEV   = 2.0       # Desvio Bollinger M5
 
+INP_ENTRY_TF    = "1m"      # Timeframe de Entrada (M1)
+INP_ENTRY_PER   = 20        # Período Bollinger M1
+INP_ENTRY_DEV   = 2.5       # Desvio Bollinger M1
+INP_BAND_BUFFER = 10        # Buffer para antecipar toque
+INP_BREAKOUT    = 20        # Gordura de rompimento
+
+INP_RSI_PER     = 14        # Período RSI
+INP_RSI_UPPER   = 70        # Nível de Venda
+INP_RSI_LOWER   = 30        # Nível de Compra
+
+INP_STOP_POINTS = 1500      # Stop Loss em pontos
+INP_TAKE_POINTS = 1000      # Take Profit em pontos
+INP_WAIT_CANDLES = 1        # Velas de espera (Sniper Logic) 
+
+# Configurações de Integração Macro
+INP_USE_MACRO_FILTER = True # Filtro S&P500/Dólar
+INP_MIN_SCORE_TRADE  = 2    # Score mínimo para operar
+
+# =========================================================
+# 3. GERENCIAMENTO DE ESTADO (SIMULADOR)
+# =========================================================
+# Inicializa as variáveis de memória da página (Streamlit Session State)
 if 'sim_active' not in st.session_state:
-    st.session_state.update({
-        'sim_active': False, 'trades_history': [], 'total_points': 0.0,
-        'wins': 0, 'losses': 0, 'pending_side': 0, 'wait_counter': 0,
-        'trigger_price': 0.0, 'last_profit_time': None, 'peak_price': 0.0
-    })
+    st.session_state.sim_active = False
+    st.session_state.trades_history = []
+    st.session_state.current_pnl = 0.0
+    st.session_state.total_points = 0.0
+    st.session_state.wins = 0
+    st.session_state.losses = 0
+    st.session_state.pending_side = 0      # 0=Neutro, 1=Compra, -1=Venda
+    st.session_state.wait_counter = 0      # Contador de exaustão
+    st.session_state.trigger_price = 0.0   # Preço de gatilho travado
+    st.session_state.last_profit_time = None
+    st.session_state.peak_price = 0.0      # Para Trailing Stop
 
 # =========================================================
-# 2. SISTEMA DE DADOS (COM REDUNDÂNCIA)
+# 4. DATA FEED - BUSCA DE PREÇOS EM TEMPO REAL
 # =========================================================
-
 class DataEngine:
     def __init__(self):
+        # Tenta conectar usando credenciais para evitar o bloqueio de IP
         try:
+            # Pega o login das configurações seguras do Streamlit
+            username = st.secrets["TV_USER"]
+            password = st.secrets["TV_PASS"]
+            self.tv = TvDatafeed(username, password)
+        except Exception as e:
+            st.error(f"Erro ao conectar com login: {e}")
+            # Se falhar, tenta o modo sem login (que é o que está dando erro agora)
             self.tv = TvDatafeed()
-        except:
-            self.tv = None
 
     def get_market_data(self, symbol="WIN1!", exchange="BMF", interval=Interval.in_1_minute, n_bars=100):
-        if not self.tv: return pd.DataFrame()
+        """Busca dados históricos e atuais do Mini Índice"""
         try:
             data = self.tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=n_bars)
-            return data if data is not None else pd.DataFrame()
+            if data is None or data.empty:
+                return pd.DataFrame()
+            return data
         except:
             return pd.DataFrame()
 
     def get_macro_prices(self):
+        """Busca preços dos ativos correlacionados para o Macro Score"""
         macro_results = {}
         for ticker in TICKERS_MACRO:
             try:
-                # Se TradingView falhar, usa Yahoo Finance para os macros
-                df = yf.download(ticker, period="2d", interval="1d", progress=False)
-                if not df.empty and len(df) >= 2:
-                    close_now = df['Close'].iloc[-1]
-                    close_prev = df['Close'].iloc[-2]
-                    macro_results[ticker] = (float(close_now) / float(close_prev)) - 1
-                else: macro_results[ticker] = 0.0
-            except: macro_results[ticker] = 0.0
+                # Busca os últimos 2 dias para calcular a variação (Shift)
+                df = self.tv.get_hist(symbol=ticker, exchange='GLOBAL', interval=Interval.in_daily, n_bars=2)
+                if df is not None and len(df) >= 2:
+                    close_now = df['close'].iloc[-1]
+                    close_prev = df['close'].iloc[-2]
+                    pct_change = (close_now / close_prev) - 1
+                    macro_results[ticker] = pct_change
+            except:
+                macro_results[ticker] = 0.0
         return macro_results
 
-def get_fallback_data():
-    """Redundância extrema via Yahoo Finance"""
-    try:
-        data = yf.download("WIN=F", period="1d", interval="1m", progress=False)
-        if not data.empty:
-            data.columns = [col[0].lower() if isinstance(col, tuple) else col.lower() for col in data.columns]
-            return data
-    except: return pd.DataFrame()
-    return pd.DataFrame()
-
 # =========================================================
-# 3. LÓGICA TÉCNICA
+# 5. CÉREBRO MATEMÁTICO - INDICADORES E MACRO SCORE
 # =========================================================
 
 def calculate_macro_score(macro_changes):
-    score, shift_total = 0, 0
+    """Calcula o Score Global (1 a 5) baseado nos Betas"""
+    score = 0
+    shift_total = 0
+    
     for ticker, beta in BETAS_WIN.items():
         if ticker in macro_changes:
-            impacto = macro_changes[ticker] * beta
+            pct_change = macro_changes[ticker]
+            impacto = pct_change * beta
             shift_total += impacto
-            if impacto > 0.001: score += 1
-            elif impacto < -0.001: score -= 1
-    return int(max(min(score, 5), -5)), shift_total
+            
+            # Lógica de pontuação baseada no impacto individual
+            if impacto > 0.001: 
+                score += 1
+            elif impacto < -0.001: 
+                score -= 1
+                
+    # Limita o score entre -5 e 5
+    final_score = int(max(min(score, 5), -5))
+    return final_score, shift_total
 
 def compute_technical_indicators(df_m1, df_m5):
+    """Processa todos os indicadores do Sniper Ultimate"""
+    
+    # --- INDICADORES M5 (TENDÊNCIA) ---
     bb_m5 = ta.bbands(df_m5['close'], length=INP_TREND_PER, std=INP_TREND_DEV)
-    df_m5['trend_mid'] = bb_m5.iloc[:, 1]
+    df_m5['trend_mid'] = bb_m5[f'BBM_{INP_TREND_PER}_{INP_TREND_DEV}']
+    
+    # --- INDICADORES M1 (ENTRADA) ---
+    # Bollinger Bands M1
     bb_m1 = ta.bbands(df_m1['close'], length=INP_ENTRY_PER, std=INP_ENTRY_DEV)
-    df_m1['entry_up'], df_m1['entry_low'], df_m1['entry_mid'] = bb_m1.iloc[:, 2], bb_m1.iloc[:, 0], bb_m1.iloc[:, 1]
+    df_m1['entry_up'] = bb_m1[f'BBU_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
+    df_m1['entry_low'] = bb_m1[f'BBL_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
+    df_m1['entry_mid'] = bb_m1[f'BBM_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
+    
+    # RSI M1
     df_m1['rsi'] = ta.rsi(df_m1['close'], length=INP_RSI_PER)
+    
+    # ATR M1 (Volatilidade para Exaustão e Stop)
     df_m1['atr'] = ta.atr(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
-    df_m1['adx'] = ta.adx(df_m1['high'], df_m1['low'], df_m1['close'], length=14).iloc[:, 0]
+    
+    # ADX M1 (Filtro de Tendência Forte)
+    adx_df = ta.adx(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
+    df_m1['adx'] = adx_df['ADX_14']
+    
     return df_m1, df_m5
 
+# =========================================================
+# 6. LÓGICA DO NARRADOR (DIAGNÓSTICO EM TEMPO REAL)
+# =========================================================
+
 def get_narrator_message(current_price, df_m1, macro_score, fair_value):
-    last_row = df_m1.iloc[-1]
-    dist_fair = abs(current_price - fair_value)
-    if st.session_state.pending_side == 0:
-        dist_up = df_m1['entry_up'].iloc[-1] - current_price
-        dist_low = current_price - df_m1['entry_low'].iloc[-1]
-        if dist_up < 500 and dist_up > 150: return f"⏳ SUBA + {int(dist_up)} pts p/ Vender."
-        return f"⏳ DESÇA + {int(dist_low)} pts p/ Comprar." if dist_low < 500 and dist_low > 150 else "💤 MEIO DE CAMPO."
+    """Gera a mensagem do Narrador baseada no checklist Sniper"""
     
-    if st.session_state.wait_counter > 0: return f"✋ FILTRO TEMPO: {st.session_state.wait_counter} velas."
-    if (st.session_state.pending_side == -1 and macro_score <= -INP_MIN_SCORE_TRADE) or \
-       (st.session_state.pending_side == 1 and macro_score >= INP_MIN_SCORE_TRADE):
-        return "🔥 DISPARANDO AGORA!!!"
-    return "⛔ BLOQUEIO: Aguardando Checklist..."
+    last_row = df_m1.iloc[-1]
+    rsi = last_row['rsi']
+    adx = last_row['adx']
+    atr = last_row['atr']
+    
+    # Verifica distância do Preço Justo (Quant)
+    dist_fair_value = abs(current_price - fair_value)
+    is_safe_dist = dist_fair_value > (180 * 1) # 1 é o _Point simplificado
+    
+    # Verifica se o Score autoriza
+    macro_buy_ok = macro_score >= INP_MIN_SCORE_TRADE
+    macro_sell_ok = macro_score <= -INP_MIN_SCORE_TRADE
+
+    # --- CENÁRIO: ESPERANDO TOQUE (Neutro) ---
+    if st.session_state.pending_side == 0:
+        dist_to_up = df_m1['entry_up'].iloc[-1] - current_price
+        dist_to_low = current_price - df_m1['entry_low'].iloc[-1]
+        
+        if dist_to_up < 500 and dist_to_up > 150:
+            return f"⏳ SUBA + {int(dist_to_up)} pts p/ Vender."
+        elif dist_to_low < 500 and dist_to_low > 150:
+            return f"⏳ DESÇA + {int(dist_to_low)} pts p/ Comprar."
+        else:
+            return "💤 MEIO DE CAMPO. Aguardando extremos."
+
+    # --- CENÁRIO: AGUARDANDO GATILHO DE VENDA ---
+    elif st.session_state.pending_side == -1:
+        if st.session_state.wait_counter > 0:
+            return f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} velas."
+        
+        # Checklist de Bloqueios
+        if rsi >= INP_RSI_UPPER:
+            return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Limite {INP_RSI_UPPER})"
+        elif adx > 35 and rsi < 75:
+            return f"⛔ BLOQUEIO ADX: {adx:.1f} (Tendência Forte)"
+        elif not macro_sell_ok:
+            return f"⛔ BLOQUEIO MACRO: Score {macro_score} não permite Venda."
+        elif not is_safe_dist:
+            return f"⛔ BLOQUEIO MÉDIA: Muito perto ({int(dist_fair_value)} pts)"
+        
+        return "🔥 DISPARANDO VENDA AGORA!!!"
+
+    # --- CENÁRIO: AGUARDANDO GATILHO DE COMPRA ---
+    elif st.session_state.pending_side == 1:
+        if st.session_state.wait_counter > 0:
+            return f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} velas."
+        
+        if rsi <= INP_RSI_LOWER:
+            return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Limite {INP_RSI_LOWER})"
+        elif adx > 35 and rsi > 25:
+            return f"⛔ BLOQUEIO ADX: {adx:.1f} (Tendência Forte)"
+        elif not macro_buy_ok:
+            return f"⛔ BLOQUEIO MACRO: Score {macro_score} não permite Compra."
+        elif not is_safe_dist:
+            return f"⛔ BLOQUEIO MÉDIA: Muito perto ({int(dist_fair_value)} pts)"
+            
+        return "🔥 DISPARANDO COMPRA AGORA!!!"
+    
+    return "Analisando mercado..."
 
 # =========================================================
-# 4. GESTÃO DE TRADES
+# 7. GESTÃO DE ORDENS SIMULADAS (PAPER TRADING)
 # =========================================================
 
 def open_sim_trade(side, price, sl, tp, is_macro=False):
-    st.session_state.update({'sim_active': True, 'sim_side': side, 'open_price': price, 
-                             'peak_price': price, 'sl_price': sl, 'tp_price': tp, 'is_macro_trade': is_macro})
-    st.toast(f"🚀 {'COMPRA' if side==1 else 'VENDA'} EM {price}")
+    """Abre uma posição simulada no estado da sessão"""
+    st.session_state.sim_active = True
+    st.session_state.sim_side = side       # 1 para Compra, -1 para Venda
+    st.session_state.open_price = price
+    st.session_state.peak_price = price
+    st.session_state.sl_price = sl
+    st.session_state.tp_price = tp
+    st.session_state.is_macro_trade = is_macro
+    st.session_state.partial_done = False
+    
+    # Registra no log do narrador
+    tipo = "COMPRA" if side == 1 else "VENDA"
+    st.toast(f"🚀 {tipo} SIMULADA: {price} | SL: {sl} | TP: {tp}")
 
 def close_sim_trade(exit_price, reason="TP/SL"):
-    side, open_p = st.session_state.sim_side, st.session_state.open_price
-    points = (exit_price - open_p) if side == 1 else (open_p - exit_price)
-    st.session_state.total_points += points
-    if points > 0: st.session_state.wins += 1
-    else: st.session_state.losses += 1
-    st.session_state.trades_history.append({"Data": datetime.now().strftime("%H:%M:%S"), "Lado": "C" if side==1 else "V", "Pontos": points, "Motivo": reason})
-    st.session_state.update({'sim_active': False, 'pending_side': 0, 'trigger_price': 0.0})
-
-def manage_smart_trailing(bid, ask):
-    if not st.session_state.sim_active: return
-    side, entry, peak = st.session_state.sim_side, st.session_state.open_price, st.session_state.peak_price
+    """Fecha a posição e calcula o resultado"""
+    side = st.session_state.sim_side
+    open_price = st.session_state.open_price
+    
+    # Cálculo de pontos (simplificado para WIN)
     if side == 1:
-        if bid > peak: st.session_state.peak_price = bid
-        if (bid - entry) > 150: st.session_state.sl_price = max(st.session_state.sl_price, entry + 10)
+        points = exit_price - open_price
     else:
-        if ask < peak: st.session_state.peak_price = ask
-        if (entry - ask) > 150: st.session_state.sl_price = min(st.session_state.sl_price, entry - 10)
+        points = open_price - exit_price
+        
+    st.session_state.total_points += points
+    
+    if points > 0:
+        st.session_state.wins += 1
+        st.session_state.last_profit_time = datetime.now()
+    else:
+        st.session_state.losses += 1
+        
+    # Salva no histórico para o Dashboard
+    st.session_state.trades_history.append({
+        "Data": datetime.now().strftime("%H:%M:%S"),
+        "Lado": "Compra" if side == 1 else "Venda",
+        "Entrada": open_price,
+        "Saída": exit_price,
+        "Pontos": points,
+        "Motivo": reason
+    })
+    
+    # Reseta o estado
+    st.session_state.sim_active = False
+    st.session_state.pending_side = 0
+    st.session_state.trigger_price = 0.0
 
 # =========================================================
-# 5. DASHBOARD E MAIN
+# 8. TRAILING STOP ELÁSTICO V2
+# =========================================================
+
+def manage_smart_trailing(current_bid, current_ask, df_m1):
+    """Gerencia o Stop Loss dinamicamente baseado no pico de preço"""
+    if not st.session_state.sim_active:
+        return
+
+    side = st.session_state.sim_side
+    entry = st.session_state.open_price
+    current_sl = st.session_state.sl_price
+    is_macro = st.session_state.is_macro_trade
+    
+    # Atualiza o pico de preço (Peak) 
+    if side == 1: # Compra
+        if current_bid > st.session_state.peak_price:
+            st.session_state.peak_price = current_bid
+        dist_points = st.session_state.peak_price - entry
+    else: # Venda
+        if current_ask < st.session_state.peak_price:
+            st.session_state.peak_price = current_ask
+        dist_points = entry - st.session_state.peak_price
+
+    # Ajuste dinâmico de gatilhos (Modo Sniper vs Macro)
+    gatilho_be = 150 if is_macro else 60
+    gatilho_elastico = 250 if is_macro else 100
+    gatilho_tendencia = 400 if is_macro else 150
+    gap_financeiro = 180 if is_macro else 70
+    min_lucro = 80 if is_macro else 50
+
+    new_sl = current_sl
+    should_modify = False
+
+    # FASE 1: Proteção Inicial (Break-Even)
+    if dist_points >= gatilho_be and dist_points < gatilho_elastico:
+        be_price = entry + 10 if side == 1 else entry - 10
+        if (side == 1 and current_sl < be_price) or (side == -1 and current_sl > be_price):
+            new_sl = be_price
+            should_modify = True
+
+    # FASE 2: Elástico (Garante Lucro)
+    elif dist_points >= gatilho_elastico and dist_points < gatilho_tendencia:
+        if side == 1:
+            target = max(st.session_state.peak_price - gap_financeiro, entry + min_lucro)
+            if target > current_sl:
+                new_sl = target
+                should_modify = True
+        else:
+            target = min(st.session_state.peak_price + gap_financeiro, entry - min_lucro)
+            if target < current_sl:
+                new_sl = target
+                should_modify = True
+
+    # FASE 3: Tendência Longa
+    elif dist_points >= gatilho_tendencia:
+        trailing_gap = 60 # Simplificado sem Z-Score para nuvem
+        if side == 1:
+            target = st.session_state.peak_price - trailing_gap
+            if target > current_sl:
+                new_sl = target
+                should_modify = True
+        else:
+            target = st.session_state.peak_price + trailing_gap
+            if target < current_sl:
+                new_sl = target
+                should_modify = True
+
+    if should_modify:
+        st.session_state.sl_price = new_sl
+
+# =========================================================
+# 9. FILTRO DE EXAUSTÃO E GATILHOS
+# =========================================================
+
+def check_exhaustion_filter(current_price, df_m1):
+    """Cancela o trade se o preço fugir demais do toque original"""
+    if st.session_state.wait_counter > 0:
+        atr = df_m1['atr'].iloc[-1]
+        max_run = atr * 2.0
+        
+        # Simula o Anchor_Price_Touch
+        anchor = df_m1['entry_up'].iloc[-5] if st.session_state.pending_side == -1 else df_m1['entry_low'].iloc[-5]
+        dist_run = abs(current_price - anchor)
+        
+        if dist_run > max_run:
+            st.session_state.pending_side = 0
+            st.session_state.wait_counter = 0
+            return True # Exausto
+    return False
+
+# =========================================================
+# 10. INTERFACE VISUAL - DASHBOARD STREAMLIT
 # =========================================================
 
 def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
-    st.set_page_config(page_title="Sniper AI", layout="centered")
-    st.markdown("<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI v8.1</h2>", unsafe_content_type=True)
-    c1, c2 = st.columns(2)
-    c1.metric("STATUS", "CAÇANDO" if st.session_state.pending_side != 0 else "ESCANEANDO")
-    c1.metric("MACRO SCORE", f"{macro_score:+}", delta=f"{shift:.4f}")
-    c2.metric("GATILHO", f"{st.session_state.trigger_price:.0f}" if st.session_state.trigger_price > 0 else "OFF")
-    c2.metric("PLACAR", f"{st.session_state.wins}W - {st.session_state.losses}L")
+    """Renderiza o painel estilo HUD para visualização mobile"""
+    
+    # Configuração de Página para Celular
+    st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
+    
+    # Título Principal
+    st.markdown(f"<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - NARRADOR v8.0</h2>", unsafe_content_type=True)
+    
+    # --- LINHA 1: MÉTRICAS PRINCIPAIS (HUD) ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Status Atual com cor dinâmica
+        state = "CAÇANDO GATILHO" if st.session_state.pending_side != 0 else "ESCANEANDO"
+        st.metric("STATUS ATUAL", state)
+        
+        # Leitura de Fluxo/Macro
+        flow_txt = f"SCORE: {macro_score:+}"
+        st.metric("LEITURA FLUXO", flow_txt, delta=f"{shift:.4f}")
+
+    with col2:
+        # Preço de Gatilho
+        trig_val = f"{st.session_state.trigger_price:.0f}" if st.session_state.trigger_price > 0 else "OFF"
+        st.metric("PREÇO GATILHO", trig_val)
+        
+        # Placar (W/L)
+        score_txt = f"{st.session_state.wins} x {st.session_state.losses}"
+        st.metric("PLACAR (W/L)", score_txt)
+
     st.divider()
-    if "🔥" in narrator_msg: st.error(narrator_msg)
-    elif "⛔" in narrator_msg: st.warning(narrator_msg)
-    else: st.info(narrator_msg)
-    st.sidebar.button("Resetar Placar", on_click=lambda: st.session_state.update({'total_points': 0, 'wins': 0, 'losses': 0, 'trades_history': []}))
+
+    # --- LINHA 2: NARRADOR (O QUE FALTA?) ---
+    st.subheader("O QUE FALTA?")
+    if "🔥" in narrator_msg:
+        st.error(narrator_msg) # Destaque para disparo
+    elif "⛔" in narrator_msg or "✋" in narrator_msg:
+        st.warning(narrator_msg) # Destaque para bloqueio
+    else:
+        st.info(narrator_msg) # Destaque neutro
+
+    # --- LINHA 3: RESULTADOS FINANCEIROS E PONTOS ---
+    c_pnl, c_pts = st.columns(2)
+    
+    with c_pnl:
+        pnl_color = "green" if st.session_state.total_points >= 0 else "red"
+        st.markdown(f"**RESULTADO:** <span style='color:{pnl_color}; font-size:20px;'>R$ {st.session_state.total_points * 0.20:.2f}</span>", unsafe_content_type=True)
+    
+    with c_pts:
+        st.markdown(f"**TOTAL PONTOS:** <span style='color:cyan; font-size:20px;'>{int(st.session_state.total_points)} pts</span>", unsafe_content_type=True)
+
+    # --- LINHA 4: GRÁFICO E HISTÓRICO --- 
+    if st.session_state.trades_history:
+        with st.expander("Ver Histórico de Trades Simulados"):
+            hist_df = pd.DataFrame(st.session_state.trades_history)
+            st.table(hist_df.tail(10)) # Mostra os últimos 10 trades
+
+    # --- SIDEBAR: CONFIGURAÇÕES AO VIVO ---
+    st.sidebar.header("Configurações Sniper")
+    mode = st.sidebar.toggle("Modo Simulação Ativo", value=True)
+    if not mode:
+        st.sidebar.error("Atenção: Apenas Simulação nesta versão Cloud.")
+    
+    # Inputs que você pode mudar pelo celular
+    st.session_state.lots = st.sidebar.number_input("Lotes (Contratos)", value=2.0, step=1.0)
+    st.sidebar.markdown(f"**Preço Atual WIN:** {current_price}")
+    
+    # Botão de Reset
+    if st.sidebar.button("Resetar Placar do Dia"):
+        st.session_state.trades_history = []
+        st.session_state.total_points = 0.0
+        st.session_state.wins = 0
+        st.session_state.losses = 0
+        st.rerun()
+
+# =========================================================
+# 11. MOTOR DE EXECUÇÃO - LÓGICA DE DECISÃO (ONTICK)
+# =========================================================
+
+@st.cache_resource
+def get_engine():
+    return DataEngine()
 
 def main():
+    # 1. INICIALIZAÇÃO DO MOTOR
     engine = DataEngine()
-    df_m1 = engine.get_market_data()
-    df_m5 = engine.get_market_data(interval=Interval.in_5_minute, n_bars=50)
     
-    # --- REDUNDÂNCIA ---
-    if df_m1.empty:
-        df_m1 = get_fallback_data()
-        df_m5 = df_m1.resample('5min').last().ffill() if not df_m1.empty else pd.DataFrame()
-
-    if df_m1.empty or len(df_m1) < 20:
-        st.error("❌ Erro de Conexão com a B3.")
-        st.info("O TradingView bloqueou o IP do servidor. Tente novamente em alguns minutos.")
-        if st.button("🔄 Tentar Reconectar Agora"): st.rerun()
-        return
-
+    # Busca dados no Feed Principal (TradingView)
+    df_m1 = engine.get_market_data(interval=Interval.in_1_minute, n_bars=100)
+    df_m5 = engine.get_market_data(interval=Interval.in_5_minute, n_bars=50)
     macro_changes = engine.get_macro_prices()
+    
+    # --- AJUSTE DE SEGURANÇA: FALLBACK (Caso o TV falhe) ---
+    if df_m1.empty or df_m5.empty:
+        st.warning("📡 Feed TradingView indisponível. Tentando redundância...")
+        df_m1_alt = get_fallback_data("WIN=F") 
+        
+        if not df_m1_alt.empty:
+            df_m1 = df_m1_alt
+            # Gera um M5 aproximado a partir do M1 para o robô não travar
+            df_m5 = df_m1.resample('5min').last().ffill()
+            st.success("✅ Conectado via Redundância (Yahoo Finance).")
+        else:
+            # Se a redundância também falhar, para aqui e mostra erro
+            st.error("❌ ERRO: Não foi possível obter dados de nenhuma fonte.")
+            st.info("O mercado pode estar fechado ou o IP do Cloud foi bloqueado.")
+            if st.button("🔄 Tentar Reconectar Agora"):
+                st.rerun()
+            return # Interrompe a execução com segurança para evitar erro 503
+
+    # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
     macro_score, shift = calculate_macro_score(macro_changes)
     
-    cur_bid = float(df_m1['close'].iloc[-1])
-    cur_ask = cur_bid + 5
-    fair_value = float(df_m5['close'].iloc[-1]) * (1.0 + shift)
-
+    # Preços atuais para o Simulador 
+    current_bid = df_m1['close'].iloc[-1]
+    current_ask = current_bid + 5 # Simulação de Spread fixo (5 pts)
+    
+    # Cálculo do Preço Justo (Fair Value / Quant)
+    ref_price = df_m5['close'].iloc[-1] # Simplificado para o fechamento anterior
+    fair_value = ref_price * (1.0 + shift)
+    
+    # 3. GESTÃO DE TRADES ATIVOS (Verifica SL/TP e Trailing)
     if st.session_state.sim_active:
-        manage_smart_trailing(cur_bid, cur_ask)
-        if st.session_state.sim_side == 1:
-            if cur_bid >= st.session_state.tp_price: close_sim_trade(st.session_state.tp_price, "TP")
-            elif cur_bid <= st.session_state.sl_price: close_sim_trade(st.session_state.sl_price, "SL")
-        else:
-            if cur_ask <= st.session_state.tp_price: close_sim_trade(st.session_state.tp_price, "TP")
-            elif cur_ask >= st.session_state.sl_price: close_sim_trade(st.session_state.sl_price, "SL")
-    else:
-        last = df_m1.iloc[-1]
-        if st.session_state.pending_side == 0:
-            if cur_ask <= (last['entry_low'] + INP_BAND_BUFFER): st.session_state.update({'pending_side': 1, 'wait_counter': INP_WAIT_CANDLES})
-            elif cur_bid >= (last['entry_up'] - INP_BAND_BUFFER): st.session_state.update({'pending_side': -1, 'wait_counter': INP_WAIT_CANDLES})
-        else:
-            msg = get_narrator_message(cur_bid, df_m1, macro_score, fair_value)
-            if "🔥" in msg:
-                sl_dist = max(last['atr'] * 2.5, 150)
-                if st.session_state.pending_side == 1: open_sim_trade(1, cur_ask, cur_bid - sl_dist, cur_bid + INP_TAKE_POINTS)
-                else: open_sim_trade(-1, cur_bid, cur_ask + sl_dist, cur_ask - INP_TAKE_POINTS)
+        side = st.session_state.sim_side
+        sl = st.session_state.sl_price
+        tp = st.session_state.tp_price
+        
+        # Gerencia Trailing Stop
+        manage_smart_trailing(current_bid, current_ask, df_m1)
+        
+        # Verifica saída por Stop ou Take
+        if side == 1: # Compra
+            if current_bid >= tp: close_sim_trade(tp, "Take Profit")
+            elif current_bid <= sl: close_sim_trade(sl, "Stop Loss")
+        else: # Venda
+            if current_ask <= tp: close_sim_trade(tp, "Take Profit")
+            elif current_ask >= sl: close_sim_trade(sl, "Stop Loss")
 
-    render_dashboard(cur_bid, macro_score, shift, df_m1, get_narrator_message(cur_bid, df_m1, macro_score, fair_value))
-    time.sleep(5) # Aumentei para 5s para evitar bloqueio de IP
+    # 4. MONITORAMENTO DE NOVAS ENTRADAS
+    else:
+        last_row = df_m1.iloc[-1]
+        
+        # FASE 1: Busca de Toque nas Bandas Quant/Bollinger 
+        if st.session_state.pending_side == 0:
+            buffer = INP_BAND_BUFFER
+            if current_ask <= (last_row['entry_low'] + buffer):
+                st.session_state.pending_side = 1
+                st.session_state.wait_counter = INP_WAIT_CANDLES
+                # Reentrada Inteligente (Reduz espera se houve lucro recente) 
+                if st.session_state.last_profit_time and (datetime.now() - st.session_state.last_profit_time).seconds < 600:
+                    st.session_state.wait_counter = 2
+            
+            elif current_bid >= (last_row['entry_up'] - buffer):
+                st.session_state.pending_side = -1
+                st.session_state.wait_counter = INP_WAIT_CANDLES
+                if st.session_state.last_profit_time and (datetime.now() - st.session_state.last_profit_time).seconds < 600:
+                    st.session_state.wait_counter = 2
+
+        # FASE 2: Gestão do Gatilho e Exaustão
+        else:
+            # Verifica se o preço já atingiu o alvo antes da entrada (Proteção Quant)
+            if (st.session_state.pending_side == 1 and current_bid >= fair_value) or \
+               (st.session_state.pending_side == -1 and current_ask <= fair_value):
+                st.session_state.pending_side = 0
+                st.session_state.trigger_price = 0
+            
+            # Filtro de Exaustão 
+            is_exhausted = check_exhaustion_filter(current_bid, df_m1)
+            
+            if not is_exhausted:
+                # Define Gatilho no fechamento da última vela
+                h1, l1 = df_m1['high'].iloc[-2], df_m1['low'].iloc[-2]
+                pad = INP_BREAKOUT
+                
+                if st.session_state.pending_side == 1: # Compra
+                    st.session_state.trigger_price = h1 + pad
+                else: # Venda
+                    st.session_state.trigger_price = l1 - pad
+                
+                # FASE 3: Disparo da Ordem (Verifica checklist do Narrador) 
+                msg = get_narrator_message(current_bid, df_m1, macro_score, fair_value)
+                if "DISPARANDO" in msg:
+                    # Define Stop e Take baseados na volatilidade atual
+                    atr_pts = last_row['atr']
+                    sl_dist = max(atr_pts * 2.5, 150)
+                    
+                    if st.session_state.pending_side == 1:
+                        sl = current_bid - sl_dist
+                        tp = current_bid + INP_TAKE_POINTS
+                        # Se for Modo Macro, alvo é no Preço Justo
+                        if abs(macro_score) >= 3: tp = fair_value
+                        open_sim_trade(1, current_ask, sl, tp, is_macro=(abs(macro_score) >= 3))
+                    else:
+                        sl = current_ask + sl_dist
+                        tp = current_ask - INP_TAKE_POINTS
+                        if abs(macro_score) >= 3: tp = fair_value
+                        open_sim_trade(-1, current_bid, sl, tp, is_macro=(abs(macro_score) >= 3))
+
+    # 5. ATUALIZAÇÃO DO DASHBOARD
+    narrator_msg = get_narrator_message(current_bid, df_m1, macro_score, fair_value)
+    render_dashboard(current_bid, macro_score, shift, df_m1, narrator_msg)
+
+    # 6. LOOP INFINITO (Auto-Refresh a cada 2 segundos)
+    time.sleep(2)
     st.rerun()
 
+# --- INICIALIZAÇÃO DO SCRIPT ---
 if __name__ == "__main__":
+
     main()
+
