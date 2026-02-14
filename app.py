@@ -39,24 +39,32 @@ class DataEngine:
         try:
             data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
             if data.empty: return 0, 0.0, 0.0035
+            
             df_close = data['Close'].ffill()
             changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
             shift, score = 0.0, 0
+            
             for t in TICKERS_MACRO:
                 if t in changes.index:
-                    val = float(changes[t])
-                    impacto = val * BETAS_WIN[t] # Usa os mesmos Betas do MT5 [cite: 4]
+                    # Ajuste para evitar o FutureWarning:
+                    val_raw = changes[t]
+                    val = float(val_raw.iloc[0]) if hasattr(val_raw, 'iloc') else float(val_raw)
+                    
+                    impacto = val * BETAS_WIN[t]
                     shift += impacto
                     if impacto > 0.001: score += 1
                     elif impacto < -0.001: score -= 1
+            
             vol = df_close.iloc[:,0].pct_change().std()
             return int(max(min(score, 5), -5)), shift, float(vol)
         except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
+        if df.empty: return 0.0
         val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
-        return float(val)
+        # Ajuste "Blindado" para garantir o retorno de um número puro:
+        return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 def get_zscore(df):
     """Calcula a tensão do preço igual ao GetCurrentZScore do MT5 [cite: 451-455]"""
     last = df.iloc[-1]
@@ -225,6 +233,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
