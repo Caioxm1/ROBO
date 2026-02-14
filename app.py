@@ -149,9 +149,10 @@ def main():
 
     # Indicadores M1
     df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
-    bb = ta.bands(df['close'], length=20, std=2.5)
+    bb = ta.bbands(df['close'], length=20, std=2.5)
     df['bb_mid'] = bb['BBM_20_2.5']
     df['bb_up']  = bb['BBU_20_2.5']
+    df['bb_low'] = bb['BBL_20_2.5']
 
     score, shift, vol = engine.get_macro_data()
     ref_price = engine.get_ref_price()
@@ -208,4 +209,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
