@@ -439,11 +439,12 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
     c_pnl, c_pts = st.columns(2)
     
     with c_pnl:
-        pnl_color = "green" if st.session_state.total_points >= 0 else "red"
+        # Corrigido: Usando unsafe_allow_html=True
         st.markdown(f"**TOTAL PONTOS:** <span style='color:cyan; font-size:20px;'>{int(st.session_state.total_points)} pts</span>", unsafe_allow_html=True)
     
     with c_pts:
-        st.markdown(f"**TOTAL PONTOS:** <span style='color:cyan; font-size:20px;'>{int(st.session_state.total_points)} pts</span>", unsafe_content_type=True)
+        # ESTA ERA A LINHA 446 COM ERRO - Corrigida abaixo:
+        st.markdown(f"**RESULTADO:** <span style='color:green; font-size:20px;'>R$ {st.session_state.total_points * 0.20:.2f}</span>", unsafe_allow_html=True)
 
     # --- LINHA 4: GRÁFICO E HISTÓRICO --- 
     if st.session_state.trades_history:
@@ -602,6 +603,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
