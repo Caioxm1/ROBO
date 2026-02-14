@@ -13,13 +13,13 @@ st.set_page_config(page_title="Sniper AI Monitor - HUD Completo", layout="wide")
 BETAS_WIN = {'^GSPC': 1.2, 'USDBRL=X': -1.0, 'USDMXN=X': -0.5, '^TNX': -0.4, 'EWZ': 1.0}
 TICKERS_MACRO = list(BETAS_WIN.keys())
 
-INP_WAIT_CANDLES = 5       # Velas de espera após o toque [cite: 18, 193]
+INP_WAIT_CANDLES = 1       # Velas de espera após o toque [cite: 18, 193]
 INP_BAND_BUFFER  = 10      # Buffer para antecipar toque [cite: 14, 187]
 INP_BREAKOUT     = 20      # Gordura de rompimento [cite: 15, 186]
 INP_RSI_UPPER    = 70      # Nível de Venda [cite: 17, 152]
 INP_RSI_LOWER    = 30      # Nível de Compra [cite: 18, 168]
 INP_ADX_LEVEL    = 35      # Filtro de tendência forte [cite: 35, 154]
-INP_TAKE_POINTS  = 300     # Take Profit [cite: 22, 255]
+INP_TAKE_POINTS  = 1000     # Take Profit [cite: 22, 255]
 INP_STOP_POINTS  = 1500    # Stop Loss [cite: 21, 274]
 
 # =========================================================
@@ -168,3 +168,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
