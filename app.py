@@ -71,45 +71,30 @@ def manage_active_trade(price, df):
     s = st.session_state
     side = s.sim_side  
     entry = s.open_price
-    is_macro = s.is_macro_trade # Nova flag para trade longo [cite: 50]
     
     if side == 1: s.peak_price = max(s.peak_price, price)
     else: s.peak_price = min(s.peak_price, price)
     
-    dist_pts = abs(s.peak_price - entry)
-    z = get_zscore(df)
+    dist_pts = abs(price - entry)
     
-    # Gatilhos Adaptativos sincronizados com ManageSmartTrailing [cite: 456, 459]
-    g_be = 150 if is_macro else 50
-    g_elastico = 250 if is_macro else 80
-    g_tendencia = 400 if is_macro else 150
-
-    if g_be <= dist_pts < g_elastico:
-        be = entry + 10 if side == 1 else entry - 10
-        if (side == 1 and s.sl_price < be) or (side == -1 and s.sl_price > be): s.sl_price = be
-
-    elif g_elastico <= dist_pts < g_tendencia:
-        gap = 180 if is_macro else 70
-        if side == 1: s.sl_price = max(s.peak_price - gap, entry + 50)
-        else: s.sl_price = min(s.peak_price + gap, entry - 50)
-
-    elif dist_pts >= g_tendencia:
-        gap = 130 if abs(z) > 3.0 else 60
-        if side == 1: s.sl_price = max(s.sl_price, s.peak_price - gap)
-        else: s.sl_price = min(s.sl_price, s.peak_price + gap)
-
-    # Substitua o final da função manage_active_trade por este:
-    # Saída Final [cite: 356]
+    # --- LOGICA DE PARCIAL (Sincronizada com MT5) ---
+    if not s.partial_done and dist_pts >= 50: # 
+        # Fecha metade (1 lote) e move para Break-Even +10 [cite: 26, 294]
+        s.current_lots -= 1.0 
+        s.partial_done = True
+        s.total_points += (50 * (1.0 / s.initial_lots)) # Salva o lucro da parcial 
+        s.sl_price = entry + 10 if side == 1 else entry - 10
+    
+    # Saída Final
     points = (price - entry) if side == 1 else (entry - price)
-    
     if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
        (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
         
-        # Cálculo Ponderado (idêntico ao MT5: pontos * peso do lote) 
+        # Ponderação por Lote: pontos * (lotes restantes / lotes iniciais) 
         weight = s.current_lots / s.initial_lots
         s.total_points += (points * weight)
         
-        if points > 0: s.wins += 1
+        if (points + (50 if s.partial_done else 0)) > 0: s.wins += 1
         else: s.losses += 1
         s.sim_active = False
 
@@ -118,8 +103,9 @@ def manage_active_trade(price, df):
 # =========================================================
 if 'sim_active' not in st.session_state:
     st.session_state.update({
-        'sim_active': False, 'trades_history': [], 'total_points': 0.0,
-        'wins': 0, 'losses': 0, 'pending_side': 0, 'wait_counter': 0,
+        'sim_active': False, 'total_points': 0.0, 'wins': 0, 'losses': 0,
+        'pending_side': 0, 'wait_counter': 0, 'is_macro_trade': False,
+        'initial_lots': 2.0, 'current_lots': 2.0, 'partial_done': False, # [cite: 20, 343]
         'peak_price': 0.0, 'sl_price': 0.0, 'tp_price': 0.0, 'open_price': 0.0, 'sim_side': 0
     })
 
@@ -154,12 +140,18 @@ def main():
     df = engine.get_market_data()
     if df.empty: return
 
-    # Indicadores
-    df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
+    # Indicadores M1 - Blindagem contra erro de dados insuficientes
+    if len(df) > 14:
+        rsi_series = ta.rsi(df['close'], length=14)
+        df['rsi'] = rsi_series.fillna(50) if rsi_series is not None else 50
+    else:
+        df['rsi'] = 50 # Valor neutro se falhar o download
+
     bb = ta.bbands(df['close'], length=20, std=2.5)
-    df['bb_low'] = bb.iloc[:, 0]
-    df['bb_mid'] = bb.iloc[:, 1]
-    df['bb_up']  = bb.iloc[:, 2]
+    if bb is not None:
+        df['bb_low'] = bb.iloc[:, 0]
+        df['bb_mid'] = bb.iloc[:, 1]
+        df['bb_up']  = bb.iloc[:, 2]
 
     score, shift, vol = engine.get_macro_data()
     ref_price = engine.get_ref_price()
@@ -199,6 +191,7 @@ def main():
                     'peak_price': current_price,
                     'initial_lots': 2.0, # Sincronizado com InpLots do WIN.txt [cite: 20]
                     'current_lots': 2.0,
+                    'partial_done': False,
                     'sl_price': current_price - 1500 if st.session_state.pending_side == 1 else current_price + 1500,
                     'tp_price': current_price + 300 if st.session_state.pending_side == 1 else current_price - 300
                 })
@@ -232,5 +225,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
