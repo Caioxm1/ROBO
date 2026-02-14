@@ -3,4 +3,6 @@ pandas
 pandas-ta
 numpy
 websocket-client
+tvdatafeed
 git+https://github.com/baselsw/tvDatafeed.git
+
