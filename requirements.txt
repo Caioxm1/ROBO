@@ -4,3 +4,4 @@ pandas-ta
 numpy
 websocket-client
 selenium
+yfinance
