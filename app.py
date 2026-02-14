@@ -109,6 +109,12 @@ class DataEngine:
                 macro_results[ticker] = 0.0
         return macro_results
 
+# --- FUNÇÃO QUE ESTAVA FALTANDO ---
+def get_fallback_data(symbol):
+    """Função de redundância usando Yahoo Finance diretamente"""
+    engine = DataEngine()
+    return engine.get_market_data(symbol=symbol, interval="1m")
+
 # =========================================================
 # 5. CÉREBRO MATEMÁTICO - INDICADORES E MACRO SCORE
 # =========================================================
@@ -459,31 +465,28 @@ def get_engine():
     return DataEngine()
 
 def main():
-    # 1. INICIALIZAÇÃO DO MOTOR
     engine = DataEngine()
     
-    # Busca dados no Feed Principal (TradingView)
-    df_m1 = engine.get_market_data(interval=Interval.in_1_minute, n_bars=100)
-    df_m5 = engine.get_market_data(interval=Interval.in_5_minute, n_bars=50)
+    # 2. Correção de tipos: Passando strings diretas para evitar o erro de 'Interval'
+    df_m1 = engine.get_market_data(symbol="WIN=F", interval="1m", n_bars=100)
+    df_m5 = engine.get_market_data(symbol="WIN=F", interval="5m", n_bars=50)
     macro_changes = engine.get_macro_prices()
     
-    # --- AJUSTE DE SEGURANÇA: FALLBACK (Caso o TV falhe) ---
+    # --- AJUSTE DE SEGURANÇA: FALLBACK ---
     if df_m1.empty or df_m5.empty:
-        st.warning("📡 Feed TradingView indisponível. Tentando redundância...")
+        st.warning("📡 Feed Principal indisponível. Tentando redundância...")
+        # Agora a função existe!
         df_m1_alt = get_fallback_data("WIN=F") 
         
         if not df_m1_alt.empty:
             df_m1 = df_m1_alt
-            # Gera um M5 aproximado a partir do M1 para o robô não travar
             df_m5 = df_m1.resample('5min').last().ffill()
             st.success("✅ Conectado via Redundância (Yahoo Finance).")
         else:
-            # Se a redundância também falhar, para aqui e mostra erro
-            st.error("❌ ERRO: Não foi possível obter dados de nenhuma fonte.")
-            st.info("O mercado pode estar fechado ou o IP do Cloud foi bloqueado.")
+            st.error("❌ ERRO: Não foi possível obter dados.")
             if st.button("🔄 Tentar Reconectar Agora"):
                 st.rerun()
-            return # Interrompe a execução com segurança para evitar erro 503
+            return
 
     # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
@@ -586,6 +589,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
