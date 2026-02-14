@@ -72,25 +72,36 @@ if 'sim_active' not in st.session_state:
 st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
 
 class DataEngine:
-    def __init__(self):
-        # Não precisa mais de login ou TvDatafeed()
-        pass
-
     def get_market_data(self, symbol="WIN=F", interval="1m", n_bars=100):
-        """Busca dados do Yahoo Finance (WIN=F é o ticker do Mini Índice)"""
+        """Busca dados do Yahoo Finance com suporte a fins de semana"""
         try:
-            # interval: '1m', '5m', '15m', '1d'
-            # period: '1d', '5d' (máximo para 1m no Yahoo é 7 dias)
-            data = yf.download(tickers=symbol, period='1d', interval=interval, progress=False)
+            # AJUSTE 1: Aumentamos o período para 7 dias (máximo p/ 1m) 
+            # para garantir dados da última sexta-feira no final de semana.
+            search_period = '7d' if interval in ['1m', '5m'] else '1mo'
+            
+            # AJUSTE 2: Garantir que o interval seja string
+            if not isinstance(interval, str):
+                interval = "1m"
+
+            data = yf.download(
+                tickers=symbol, 
+                period=search_period, 
+                interval=interval, 
+                progress=False,
+                timeout=10 # Evita que o app trave se o Yahoo demorar
+            )
             
             if data.empty:
+                # Teste com ticker alternativo se WIN=F falhar
+                if symbol == "WIN=F":
+                    st.sidebar.warning(f"Ticker {symbol} falhou. Tentando ^BVSP...")
+                    return self.get_market_data(symbol="^BVSP", interval=interval, n_bars=n_bars)
                 return pd.DataFrame()
             
-            # Padroniza nomes das colunas (Yahoo retorna Maiúsculo, o bot usa minúsculo)
             data.columns = [col.lower() for col in data.columns]
             return data.tail(n_bars)
         except Exception as e:
-            st.error(f"Erro no Yahoo Finance: {e}")
+            st.error(f"Erro Crítico no Yahoo Finance: {e}")
             return pd.DataFrame()
 
     def get_macro_prices(self):
@@ -589,6 +600,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
