@@ -19,7 +19,7 @@ INP_BREAKOUT     = 20      # Gordura de rompimento [cite: 15, 186]
 INP_RSI_UPPER    = 70      # Nível de Venda [cite: 17, 152]
 INP_RSI_LOWER    = 30      # Nível de Compra [cite: 18, 168]
 INP_ADX_LEVEL    = 35      # Filtro de tendência forte [cite: 35, 154]
-INP_TAKE_POINTS  = 1000     # Take Profit [cite: 22, 255]
+INP_TAKE_POINTS  = 300     # Take Profit [cite: 22, 255]
 INP_STOP_POINTS  = 1500    # Stop Loss [cite: 21, 274]
 
 # =========================================================
@@ -168,4 +168,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
