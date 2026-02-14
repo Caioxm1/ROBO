@@ -28,7 +28,7 @@ INP_STOP_POINTS  = 1500    # [cite: 21, 274]
 class DataEngine:
     def get_market_data(self, symbol="^BVSP", interval="1m", n_bars=100):
         try:
-            data = yf.download(symbol, period='7d', interval=interval, progress=False)
+            data = yf.download(symbol, period='2d', interval=interval, progress=False)
             if data.empty: return pd.DataFrame()
             if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
             data.columns = [str(col).lower() for col in data.columns]
@@ -36,35 +36,27 @@ class DataEngine:
         except: return pd.DataFrame()
 
     def get_macro_data(self):
-        """Sincronizado com Sniper_Data_Feed.py"""
         try:
-            # Dados diários para Volatilidade Real
             data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
             if data.empty: return 0, 0.0, 0.0035
-            
             df_close = data['Close'].ffill()
             changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
             shift, score = 0.0, 0
-            
             for t in TICKERS_MACRO:
                 if t in changes.index:
-                    val = float(changes[t].iloc[0]) if hasattr(changes[t], 'iloc') else float(changes[t])
-                    impacto = val * BETAS_WIN[t]
+                    val = float(changes[t])
+                    impacto = val * BETAS_WIN[t] # Usa os mesmos Betas do MT5 [cite: 4]
                     shift += impacto
                     if impacto > 0.001: score += 1
                     elif impacto < -0.001: score -= 1
-            
-            # Volatilidade do S&P 500
             vol = df_close.iloc[:,0].pct_change().std()
             return int(max(min(score, 5), -5)), shift, float(vol)
         except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
-        """Busca o refPrice (Fechamento anterior) [cite: 556]"""
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
         val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
-        return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
-
+        return float(val)
 def get_zscore(df):
     """Calcula a tensão do preço igual ao GetCurrentZScore do MT5 [cite: 451-455]"""
     last = df.iloc[-1]
@@ -76,10 +68,10 @@ def get_zscore(df):
 # 3. GESTÃO DE TRADE (TRAILING E PLACAR)
 # =========================================================
 def manage_active_trade(price, df):
-    """Trailing Stop Elástico de 3 Fases [cite: 313-332, 458-491]"""
     s = st.session_state
     side = s.sim_side  
     entry = s.open_price
+    is_macro = s.is_macro_trade # Nova flag para trade longo [cite: 50]
     
     if side == 1: s.peak_price = max(s.peak_price, price)
     else: s.peak_price = min(s.peak_price, price)
@@ -87,23 +79,25 @@ def manage_active_trade(price, df):
     dist_pts = abs(s.peak_price - entry)
     z = get_zscore(df)
     
-    # FASE 1: Proteção Zero (60 pts) [cite: 319-322, 481-484]
-    if 60 <= dist_pts < 100:
+    # Gatilhos Adaptativos sincronizados com ManageSmartTrailing [cite: 456, 459]
+    g_be = 150 if is_macro else 50
+    g_elastico = 250 if is_macro else 80
+    g_tendencia = 400 if is_macro else 150
+
+    if g_be <= dist_pts < g_elastico:
         be = entry + 10 if side == 1 else entry - 10
         if (side == 1 and s.sl_price < be) or (side == -1 and s.sl_price > be): s.sl_price = be
 
-    # FASE 2: Elástico (100 pts) [cite: 323-327, 485-490]
-    elif 100 <= dist_pts < 150:
-        if side == 1: s.sl_price = max(s.peak_price - 100, entry + 50)
-        else: s.sl_price = min(s.peak_price + 100, entry - 50)
+    elif g_elastico <= dist_pts < g_tendencia:
+        gap = 180 if is_macro else 70
+        if side == 1: s.sl_price = max(s.peak_price - gap, entry + 50)
+        else: s.sl_price = min(s.peak_price + gap, entry - 50)
 
-    # FASE 3: Tendência (150 pts) [cite: 328-332, 491-496]
-    elif dist_pts >= 150:
+    elif dist_pts >= g_tendencia:
         gap = 130 if abs(z) > 3.0 else 60
         if side == 1: s.sl_price = max(s.sl_price, s.peak_price - gap)
         else: s.sl_price = min(s.sl_price, s.peak_price + gap)
 
-    # Saída Final [cite: 352-366]
     points = (price - entry) if side == 1 else (entry - price)
     if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
        (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
@@ -226,3 +220,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
