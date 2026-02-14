@@ -73,49 +73,53 @@ st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
 
 class DataEngine:
     def get_market_data(self, symbol="WIN=F", interval="1m", n_bars=100):
-        """Busca dados do Yahoo Finance com suporte a fins de semana"""
+        """Busca dados com tratamento para MultiIndex e Finais de Semana"""
         try:
-            # AJUSTE 1: Aumentamos o período para 7 dias (máximo p/ 1m) 
-            # para garantir dados da última sexta-feira no final de semana.
             search_period = '7d' if interval in ['1m', '5m'] else '1mo'
             
-            # AJUSTE 2: Garantir que o interval seja string
-            if not isinstance(interval, str):
-                interval = "1m"
+            # Força o intervalo a ser string
+            str_interval = str(interval) if "Interval" not in str(type(interval)) else "1m"
 
             data = yf.download(
                 tickers=symbol, 
                 period=search_period, 
-                interval=interval, 
+                interval=str_interval, 
                 progress=False,
-                timeout=10 # Evita que o app trave se o Yahoo demorar
+                timeout=15
             )
             
-            if data.empty:
-                # Teste com ticker alternativo se WIN=F falhar
+            # Verificação de integridade
+            if not isinstance(data, pd.DataFrame) or data.empty:
                 if symbol == "WIN=F":
-                    st.sidebar.warning(f"Ticker {symbol} falhou. Tentando ^BVSP...")
-                    return self.get_market_data(symbol="^BVSP", interval=interval, n_bars=n_bars)
+                    st.sidebar.warning(f"Ticker {symbol} indisponível. Tentando ^BVSP...")
+                    return self.get_market_data(symbol="^BVSP", interval=str_interval, n_bars=n_bars)
                 return pd.DataFrame()
+
+            # CORREÇÃO CRÍTICA: Trata o erro de 'tuple' object (MultiIndex)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0].lower() for col in data.columns]
+            else:
+                data.columns = [col.lower() for col in data.columns]
             
-            data.columns = [col.lower() for col in data.columns]
             return data.tail(n_bars)
         except Exception as e:
-            st.error(f"Erro Crítico no Yahoo Finance: {e}")
+            st.error(f"Erro no Motor de Dados: {e}")
             return pd.DataFrame()
 
     def get_macro_prices(self):
-        """Busca preços macro usando Yahoo Finance"""
         macro_results = {}
-        # Mapeamento: Ticker TV -> Ticker Yahoo
-        # S&P500: ^GSPC | DXY: DX-Y.NYB | Treasury: ^TNX
         for ticker in TICKERS_MACRO:
             try:
-                df = yf.download(ticker, period='2d', interval='1d', progress=False)
-                if not df.empty and len(df) >= 2:
+                df = yf.download(ticker, period='5d', interval='1d', progress=False)
+                if not df.empty:
+                    # Pega os dois últimos dias com dados (ignorando fds)
                     close_now = df['Close'].iloc[-1]
                     close_prev = df['Close'].iloc[-2]
-                    macro_results[ticker] = (close_now / close_prev) - 1
+                    # Ajuste para MultiIndex no macro também
+                    if isinstance(close_now, pd.Series): close_now = close_now.iloc[0]
+                    if isinstance(close_prev, pd.Series): close_prev = close_prev.iloc[0]
+                    
+                    macro_results[ticker] = (float(close_now) / float(close_prev)) - 1
             except:
                 macro_results[ticker] = 0.0
         return macro_results
@@ -396,7 +400,7 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
     """Renderiza o painel estilo HUD para visualização mobile"""
     
     # Configuração de Página para Celular
-    st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
+    # st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
     
     # Título Principal
     st.markdown(f"<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - NARRADOR v8.0</h2>", unsafe_content_type=True)
@@ -478,26 +482,16 @@ def get_engine():
 def main():
     engine = DataEngine()
     
-    # 2. Correção de tipos: Passando strings diretas para evitar o erro de 'Interval'
-    df_m1 = engine.get_market_data(symbol="WIN=F", interval="1m", n_bars=100)
-    df_m5 = engine.get_market_data(symbol="WIN=F", interval="5m", n_bars=50)
+    # Busca dados
+    df_m1 = engine.get_market_data(symbol="WIN=F", interval="1m")
+    df_m5 = engine.get_market_data(symbol="WIN=F", interval="5m")
     macro_changes = engine.get_macro_prices()
     
-    # --- AJUSTE DE SEGURANÇA: FALLBACK ---
-    if df_m1.empty or df_m5.empty:
-        st.warning("📡 Feed Principal indisponível. Tentando redundância...")
-        # Agora a função existe!
-        df_m1_alt = get_fallback_data("WIN=F") 
-        
-        if not df_m1_alt.empty:
-            df_m1 = df_m1_alt
-            df_m5 = df_m1.resample('5min').last().ffill()
-            st.success("✅ Conectado via Redundância (Yahoo Finance).")
-        else:
-            st.error("❌ ERRO: Não foi possível obter dados.")
-            if st.button("🔄 Tentar Reconectar Agora"):
-                st.rerun()
-            return
+    if df_m1.empty:
+        st.error("❌ ERRO: Mercado Fechado ou Ticker Inválido.")
+        st.info("Hoje é sábado. O Yahoo pode não fornecer dados de 1min para WIN=F agora.")
+        if st.button("🔄 Forçar Recarga"): st.rerun()
+        return
 
     # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
@@ -600,6 +594,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
