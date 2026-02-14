@@ -155,28 +155,39 @@ def calculate_macro_score(macro_changes):
     return final_score, shift_total
 
 def compute_technical_indicators(df_m1, df_m5):
-    """Processa indicadores usando indexação posicional para evitar KeyError"""
-    
-    # --- INDICADORES M5 (TENDÊNCIA) ---
+    """Processa indicadores com limpeza de dados e fallback para evitar NoneType"""
+    # Limpa linhas com valores vazios que quebram o cálculo
+    df_m1 = df_m1.dropna(subset=['close', 'high', 'low']).copy()
+    df_m5 = df_m5.dropna(subset=['close', 'high', 'low']).copy()
+
+    # --- INDICADORES M5 ---
     bb_m5 = ta.bbands(df_m5['close'], length=INP_TREND_PER, std=INP_TREND_DEV)
-    # iloc[:, 1] pega a coluna do meio (BBM) independente do nome
-    df_m5['trend_mid'] = bb_m5.iloc[:, 1] 
+    if bb_m5 is not None:
+        df_m5['trend_mid'] = bb_m5.iloc[:, 1]
+    else:
+        # Fallback manual se o pandas_ta falhar
+        df_m5['trend_mid'] = df_m5['close'].rolling(window=INP_TREND_PER).mean()
     
-    # --- INDICADORES M1 (ENTRADA) ---
+    # --- INDICADORES M1 ---
     bb_m1 = ta.bbands(df_m1['close'], length=INP_ENTRY_PER, std=INP_ENTRY_DEV)
-    df_m1['entry_low'] = bb_m1.iloc[:, 0] # BBL
-    df_m1['entry_mid'] = bb_m1.iloc[:, 1] # BBM
-    df_m1['entry_up']  = bb_m1.iloc[:, 2] # BBU
+    if bb_m1 is not None:
+        df_m1['entry_low'] = bb_m1.iloc[:, 0]
+        df_m1['entry_mid'] = bb_m1.iloc[:, 1]
+        df_m1['entry_up']  = bb_m1.iloc[:, 2]
+    else:
+        # Fallback manual para M1
+        ma = df_m1['close'].rolling(window=INP_ENTRY_PER).mean()
+        std = df_m1['close'].rolling(window=INP_ENTRY_PER).std()
+        df_m1['entry_mid'] = ma
+        df_m1['entry_low'] = ma - (std * INP_ENTRY_DEV)
+        df_m1['entry_up']  = ma + (std * INP_ENTRY_DEV)
     
-    # RSI M1
-    df_m1['rsi'] = ta.rsi(df_m1['close'], length=INP_RSI_PER)
+    # RSI, ATR e ADX com preenchimento de nulos
+    df_m1['rsi'] = ta.rsi(df_m1['close'], length=INP_RSI_PER).fillna(50)
+    df_m1['atr'] = ta.atr(df_m1['high'], df_m1['low'], df_m1['close'], length=14).fillna(10)
     
-    # ATR M1
-    df_m1['atr'] = ta.atr(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
-    
-    # ADX M1
     adx_df = ta.adx(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
-    df_m1['adx'] = adx_df.iloc[:, 0] # Coluna ADX_14
+    df_m1['adx'] = adx_df.iloc[:, 0].fillna(20) if adx_df is not None else 20
     
     return df_m1, df_m5
 
@@ -603,6 +614,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
