@@ -69,7 +69,7 @@ def get_zscore(df):
 # 3. GESTÃO DE TRADE (TRAILING E PLACAR)
 # =========================================================
 def manage_active_trade(price, df):
-    """Trailing Stop Elástico de 3 Fases [cite: 313, 458]"""
+    """Trailing Stop Elástico de 3 Fases"""
     s = st.session_state
     side = s.sim_side  
     entry = s.open_price
@@ -149,7 +149,7 @@ def main():
 
     # Indicadores M1
     df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
-    bb = ta.bands(df['close'], length=20, std=2.5) # [cite:: 13, 83]
+    bb = ta.bands(df['close'], length=20, std=2.5)
     df['bb_mid'] = bb['BBM_20_2.5']
     df['bb_up']  = bb['BBU_20_2.5']
 
@@ -208,3 +208,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
