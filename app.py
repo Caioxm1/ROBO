@@ -66,17 +66,22 @@ if 'sim_active' not in st.session_state:
 # =========================================================
 # 4. DATA FEED - BUSCA DE PREÇOS EM TEMPO REAL
 # =========================================================
+# 1. MOVA ISSO PARA O TOPO (Antes de qualquer lógica)
+st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
+
 class DataEngine:
     def __init__(self):
-        # Tenta conectar usando credenciais para evitar o bloqueio de IP
         try:
-            # Pega o login das configurações seguras do Streamlit
-            username = st.secrets["TV_USER"]
-            password = st.secrets["TV_PASS"]
-            self.tv = TvDatafeed(username, password)
+            # Verifica se as chaves existem antes de acessar
+            if "TV_USER" in st.secrets:
+                username = st.secrets["TV_USER"]
+                password = st.secrets["TV_PASS"]
+                self.tv = TvDatafeed(username, password)
+            else:
+                st.warning("⚠️ Secrets não encontradas. Usando modo convidado.")
+                self.tv = TvDatafeed()
         except Exception as e:
-            st.error(f"Erro ao conectar com login: {e}")
-            # Se falhar, tenta o modo sem login (que é o que está dando erro agora)
+            st.error(f"Erro na conexão: {e}")
             self.tv = TvDatafeed()
 
     def get_market_data(self, symbol="WIN1!", exchange="BMF", interval=Interval.in_1_minute, n_bars=100):
@@ -582,4 +587,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
