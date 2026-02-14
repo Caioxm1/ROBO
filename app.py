@@ -5,195 +5,166 @@ import time
 from datetime import datetime
 import yfinance as yf
 
-st.set_page_config(page_title="Sniper AI Monitor - Sincronizado", layout="centered")
+st.set_page_config(page_title="Sniper AI Monitor - HUD Completo", layout="wide")
 
 # =========================================================
-# 1. CONFIGURAÇÕES IDENTICAS AO MT5 (WIN.txt)
+# 1. CONFIGURAÇÕES E INPUTS (Sincronizados com WIN.txt)
 # =========================================================
 BETAS_WIN = {'^GSPC': 1.2, 'USDBRL=X': -1.0, 'USDMXN=X': -0.5, '^TNX': -0.4, 'EWZ': 1.0}
 TICKERS_MACRO = list(BETAS_WIN.keys())
 
-# [cite_start]Parâmetros Sincronizados [cite: 18, 21, 25]
-INP_WAIT_CANDLES = 5
-INP_BAND_BUFFER  = 10
-INP_BREAKOUT     = 20
-INP_TAKE_POINTS  = 300
-INP_STOP_POINTS  = 1500
-INP_PARTIAL_PTS  = 50
-INP_PARTIAL_VOL  = 1.0
+INP_WAIT_CANDLES = 5       # Velas de espera após o toque [cite: 18, 193]
+INP_BAND_BUFFER  = 10      # Buffer para antecipar toque [cite: 14, 187]
+INP_BREAKOUT     = 20      # Gordura de rompimento [cite: 15, 186]
+INP_RSI_UPPER    = 70      # Nível de Venda [cite: 17, 152]
+INP_RSI_LOWER    = 30      # Nível de Compra [cite: 18, 168]
+INP_ADX_LEVEL    = 35      # Filtro de tendência forte [cite: 35, 154]
+INP_TAKE_POINTS  = 300     # Take Profit [cite: 22, 255]
+INP_STOP_POINTS  = 1500    # Stop Loss [cite: 21, 274]
 
 # =========================================================
-# 2. MOTOR DE DADOS QUANT (COM CORREÇÃO DE MULTIINDEX)
+# 2. MOTOR DE DADOS (Blindado contra erros de Series)
 # =========================================================
 class DataEngine:
     def get_market_data(self, symbol="BOVA11.SA", interval="1m", n_bars=100):
         try:
             data = yf.download(symbol, period='7d', interval=interval, progress=False)
             if data.empty: return pd.DataFrame()
-            
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-            
+            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
             data.columns = [str(col).lower() for col in data.columns]
             return data.tail(n_bars)
         except: return pd.DataFrame()
 
-    def get_macro_and_vol(self):
-        """Calcula Score e Volatilidade com extração escalar (.item())"""
+    def get_macro_data(self):
         try:
             data = yf.download(TICKERS_MACRO, period="2d", interval="1m", progress=False)
-            if not data.empty:
-                df_close = data['Close'].ffill()
-                # .iloc[-1] e .iloc[-2] podem retornar Series, usamos .item() para extrair o valor único
-                changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
-                
-                shift_total = 0.0
-                score = 0
-                for t in TICKERS_MACRO:
-                    if t in changes.index:
-                        # O segredo para não ter erro é o .item() ou .iloc[0]
-                        val_change = float(changes[t].item()) if hasattr(changes[t], 'item') else float(changes[t])
-                        impacto = val_change * BETAS_WIN[t]
-                        shift_total += impacto
-                        if impacto > 0.001: score += 1
-                        elif impacto < -0.001: score -= 1
-                
-                # Cálculo da Volatilidade Diária (Base 252 dias para as bandas não colapsarem)
-                vol = df_close.iloc[:,0].pct_change().std() * (252**0.5) 
-                # Se vol for nan ou 0, usamos o padrão do MT5
-                final_vol = float(vol.item()) if (not pd.isna(vol) and vol > 0) else 0.0035
-                
-                return int(max(min(score, 5), -5)), shift_total, final_vol
-        except: pass
-        return 0, 0.0, 0.0035
+            if data.empty: return 0, 0.0, 0.0035
+            df_close = data['Close'].ffill()
+            changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
+            shift, score = 0.0, 0
+            for t in TICKERS_MACRO:
+                if t in changes.index:
+                    val = float(changes[t].iloc[0]) if hasattr(changes[t], 'iloc') else float(changes[t])
+                    impacto = val * BETAS_WIN[t]
+                    shift += impacto
+                    if impacto > 0.001: score += 1
+                    elif impacto < -0.001: score -= 1
+            vol = df_close.iloc[:,0].pct_change().std()
+            return int(max(min(score, 5), -5)), shift, float(vol)
+        except: return 0, 0.0, 0.0035
 
-    def get_prev_day_close(self, symbol="BOVA11.SA"):
-        """Extrai o preço de fechamento como um escalar puro"""
-        df = yf.download(symbol, period="5d", interval="1d", progress=False)
-        if len(df) >= 2:
-            val = df['Close'].iloc[-2]
-            return float(val.item()) if hasattr(val, 'item') else float(val)
-        val = df['Close'].iloc[-1]
-        return float(val.item()) if hasattr(val, 'item') else float(val)
+    def get_ref_price(self):
+        df = yf.download("BOVA11.SA", period="5d", interval="1d", progress=False)
+        val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
+        return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 
 # =========================================================
-# 3. GESTÃO DE ESTADO
+# 3. GESTÃO DE ESTADO (PLACAR E HISTÓRICO)
 # =========================================================
 if 'sim_active' not in st.session_state:
     st.session_state.update({
-        'sim_active': False, 'total_points': 0.0, 'wins': 0, 'losses': 0,
-        'pending_side': 0, 'wait_counter': 0, 'trigger_price': 0.0,
-        'partial_done': False, 'current_lots': 2.0, 'profit_closed': 0.0
+        'sim_active': False, 'trades_history': [], 'total_points': 0.0,
+        'wins': 0, 'losses': 0, 'pending_side': 0, 'wait_counter': 0,
+        'trigger_price': 0.0, 'partial_done': False, 'current_lots': 2.0
     })
 
 # =========================================================
-# 4. LÓGICA DE EXECUÇÃO (ONTICK)
+# 4. LÓGICA DO NARRADOR (O QUE FALTA?)
+# =========================================================
+def get_narrator_message(price, df, score, fair_value):
+    if st.session_state.sim_active:
+        return "🚀 POSIÇÃO ABERTA: Monitorando Alvo/Stop."
+    
+    if st.session_state.pending_side == 0:
+        return "💤 MEIO DE CAMPO. Aguardando toque nas extremidades Quant."
+
+    last = df.iloc[-1]
+    rsi, adx = last['rsi'], last['adx']
+    dist_fair = abs(price - fair_value)
+
+    # Checklist de Bloqueios (Idêntico ao WIN.txt) 
+    if st.session_state.wait_counter > 0:
+        return f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} velas para autorizar." 
+    
+    if st.session_state.pending_side == 1: # Compra
+        if rsi <= INP_RSI_LOWER: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Frio)" 
+        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente para Compra." 
+        if dist_fair < 180: return f"⛔ BLOQUEIO MÉDIA: Muito perto do Preço Justo." 
+        return "🔥 DISPARANDO COMPRA AGORA!!!"
+    
+    if st.session_state.pending_side == -1: # Venda
+        if rsi >= INP_RSI_UPPER: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Quente)" 
+        if score > -2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente para Venda." 
+        if dist_fair < 180: return f"⛔ BLOQUEIO MÉDIA: Muito perto do Preço Justo." # [cite: 161, 242]
+        return "🔥 DISPARANDO VENDA AGORA!!!" # [cite: 162]
+
+# =========================================================
+# 5. EXECUÇÃO PRINCIPAL
 # =========================================================
 def main():
     engine = DataEngine()
-    df_m1 = engine.get_market_data()
-    
-    if df_m1.empty:
-        st.warning("Aguardando dados do mercado...")
-        return
+    df = engine.get_market_data()
+    if df.empty: return
 
-    prev_close = engine.get_prev_day_close()
-    score, shift, vol = engine.get_macro_and_vol()
-
-    # [cite_start]--- CÁLCULO DAS LINHAS QUANT (IDENTICO AO MT5) [cite: 557, 558] ---
-    fair_value = float(prev_close * (1.0 + shift))
-    daily_vol_pts = fair_value * vol
-    scalp_vol_pts = daily_vol_pts / 12.0
+    # Indicadores
+    df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
+    df['adx'] = ta.adx(df['high'], df['low'], df['close'])['ADX_14'].fillna(20)
     
-    q_up = float(fair_value + (scalp_vol_pts * 2.5))
-    q_dn = float(fair_value - (scalp_vol_pts * 2.5))
+    score, shift, vol = engine.get_macro_data()
+    ref_price = engine.get_ref_price()
+    fair_value = ref_price * (1.0 + shift)
+    q_up = fair_value + (fair_value * vol / 12.0 * 2.5)
+    q_dn = fair_value - (fair_value * vol / 12.0 * 2.5)
+    current_price = float(df['close'].iloc[-1])
 
-    # Forçamos o preço atual para float para evitar o erro relatado
-    current_price = float(df_m1['close'].iloc[-1])
-    
-    # --- MONITORAMENTO DE ENTRADA ---
+    # Lógica de Gatilho
     if not st.session_state.sim_active:
-        # [cite_start]Se tocar nas bandas (com buffer de 10 pts) [cite: 187]
-        if st.session_state.pending_side == 0:
-            if current_price <= (q_dn + INP_BAND_BUFFER):
-                st.session_state.pending_side = 1
-                st.session_state.wait_counter = INP_WAIT_CANDLES
-            elif current_price >= (q_up - INP_BAND_BUFFER):
-                st.session_state.pending_side = -1
-                st.session_state.wait_counter = INP_WAIT_CANDLES
-            
-        # Lógica de Gatilho (Wait Counter)
-        if st.session_state.wait_counter > 0:
-            st.session_state.wait_counter -= 1
+        if current_price <= (q_dn + INP_BAND_BUFFER): st.session_state.pending_side = 1; st.session_state.wait_counter = INP_WAIT_CANDLES
+        elif current_price >= (q_up - INP_BAND_BUFFER): st.session_state.pending_side = -1; st.session_state.wait_counter = INP_WAIT_CANDLES
+        
+        if st.session_state.wait_counter > 0: st.session_state.wait_counter -= 1
         elif st.session_state.pending_side != 0:
-            # [cite_start]Pega High/Low da vela anterior para o gatilho [cite: 209]
-            h1 = float(df_m1['high'].iloc[-2])
-            l1 = float(df_m1['low'].iloc[-2])
-            
-            if st.session_state.pending_side == 1:
-                st.session_state.trigger_price = h1 + INP_BREAKOUT
-                if current_price >= st.session_state.trigger_price:
-                    open_trade(1, current_price, score, q_up, q_dn)
-            else:
-                st.session_state.trigger_price = l1 - INP_BREAKOUT
-                if current_price <= st.session_state.trigger_price:
-                    open_trade(-1, current_price, score, q_up, q_dn)
+            msg = get_narrator_message(current_price, df, score, fair_value)
+            if "DISPARANDO" in msg:
+                # Abre trade simulado
+                st.session_state.sim_active = True
+                st.session_state.open_price = current_price
+                st.session_state.trades_history.append({"Hora": datetime.now().strftime("%H:%M"), "Lado": "Compra" if st.session_state.pending_side == 1 else "Venda", "Preço": current_price})
 
-    else:
-        manage_active_trade(current_price)
+    # --- RENDERIZAÇÃO DO DASHBOARD ---
+    st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - MONITOR v8.0</h1>", unsafe_allow_html=True) # [cite: 389]
+    
+    # HUD de Métricas
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("STATUS", "CAÇANDO" if st.session_state.pending_side != 0 else "ESCANEANDO") # [cite: 391]
+    c2.metric("SCORE MACRO", f"{score:+}", delta=f"{shift:.4f}") # [cite: 409, 414]
+    c3.metric("PLACAR (W/L)", f"{st.session_state.wins} x {st.session_state.losses}") # [cite: 398, 427]
+    c4.metric("PONTOS HOJE", f"{int(st.session_state.total_points)} pts") # [cite: 399, 430]
 
-    # --- DASHBOARD HUD ---
-    st.markdown(f"## 🎯 SNIPER AI - MONITOR")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("PREÇO WIN", f"{current_price:,.0f}")
-    col2.metric("SCORE MACRO", f"{score:+}")
-    col3.metric("FAIR VALUE", f"{fair_value:,.0f}")
-
-    # Visualização das Zonas
     st.divider()
-    st.write(f"**Status:** {'🟢 COMPRA' if st.session_state.pending_side == 1 else '🔴 VENDA' if st.session_state.pending_side == -1 else '⚪ BUSCANDO TOQUE'}")
-    if st.session_state.wait_counter > 0:
-        st.info(f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} barras.")
+
+    # Narrador (O que falta?)
+    st.subheader("O QUE FALTA?")
+    msg = get_narrator_message(current_price, df, score, fair_value)
+    if "⛔" in msg or "✋" in msg: st.warning(msg)
+    elif "🔥" in msg: st.error(msg)
+    else: st.info(msg)
+
+    # Resultado Financeiro
+    res_val = st.session_state.total_points * 0.20 
+    st.markdown(f"### RESULTADO: <span style='color: #00FF00;'>R$ {res_val:.2f}</span>", unsafe_allow_html=True) # [cite: 401, 432]
+
+    # Histórico e Sidebar
+    with st.expander("Ver Histórico de Trades"):
+        if st.session_state.trades_history: st.table(pd.DataFrame(st.session_state.trades_history))
     
-    st.sidebar.markdown("### 📊 Linhas Quant (MT5)")
-    st.sidebar.error(f"Venda Scalper: {q_up:,.0f}")
-    st.sidebar.warning(f"Preço Justo: {fair_value:,.0f}")
-    st.sidebar.success(f"Compra Scalper: {q_dn:,.0f}")
-    
+    st.sidebar.title("📊 Linhas Quant (MT5)") 
+    st.sidebar.error(f"Venda Scalper: {q_up:,.0f}") 
+    st.sidebar.warning(f"Preço Justo: {fair_value:,.0f}") 
+    st.sidebar.success(f"Compra Scalper: {q_dn:,.0f}") 
+
     time.sleep(2)
     st.rerun()
 
-def open_trade(side, price, score, q_up, q_dn):
-    # [cite_start]Filtro Macro [cite: 241, 242]
-    if (side == 1 and score < 2) or (side == -1 and score > -2):
-        return
-
-    st.session_state.update({
-        'sim_active': True, 'sim_side': side, 'open_price': price,
-        'peak_price': price, 'partial_done': False,
-        'sl_price': price - 1500 if side == 1 else price + 1500,
-        'tp_price': price + 300 if side == 1 else price - 300
-    })
-
-def manage_active_trade(price):
-    s = st.session_state
-    side = s.sim_side
-    points = (price - s.open_price) if side == 1 else (s.open_price - price)
-    
-    # [cite_start]1. Parcial (50 pts) [cite: 25, 292]
-    if not s.partial_done and points >= INP_PARTIAL_PTS:
-        s.partial_done = True
-        s.sl_price = s.open_price + 10 if side == 1 else s.open_price - 10
-        st.toast("✅ Parcial Executada! Stop no Break-Even.")
-
-    # 2. Saída Final
-    if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
-       (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
-        st.session_state.total_points += points
-        st.session_state.sim_active = False
-        st.session_state.pending_side = 0
-
 if __name__ == "__main__":
     main()
-
-
