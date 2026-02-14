@@ -35,23 +35,28 @@ class DataEngine:
             return data.tail(n_bars)
         except: return pd.DataFrame()
 
-    def get_macro_data(self):
-        try:
-            data = yf.download(TICKERS_MACRO, period="2d", interval="1m", progress=False)
-            if data.empty: return 0, 0.0, 0.0035
-            df_close = data['Close'].ffill()
-            changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
-            shift, score = 0.0, 0
-            for t in TICKERS_MACRO:
-                if t in changes.index:
-                    val = float(changes[t].iloc[0]) if hasattr(changes[t], 'iloc') else float(changes[t])
-                    impacto = val * BETAS_WIN[t]
-                    shift += impacto
-                    if impacto > 0.001: score += 1
-                    elif impacto < -0.001: score -= 1
-            vol = df_close.iloc[:,0].pct_change().std()
-            return int(max(min(score, 5), -5)), shift, float(vol)
-        except: return 0, 0.0, 0.0035
+    # --- AJUSTE IDENTICO AO Sniper_Data_Feed.py ---
+def get_macro_data(self):
+    try:
+        # Baixa dados diários para calcular a Volatilidade Real do dia anterior
+        data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
+        if data.empty: return 0, 0.0, 0.0035
+        
+        df_close = data['Close'].ffill()
+        # Variação e Score
+        changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
+        shift, score = 0.0, 0
+        for t in TICKERS_MACRO:
+            val = float(changes[t])
+            impacto = val * BETAS_WIN[t]
+            shift += impacto
+            if impacto > 0.001: score += 1
+            elif impacto < -0.001: score -= 1
+            
+        # Volatilidade Exata do S&P500
+        vol = df_close['^GSPC'].pct_change().std() 
+        return int(max(min(score, 5), -5)), shift, float(vol)
+    except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
@@ -162,8 +167,15 @@ def main():
     score, shift, vol = engine.get_macro_data()
     ref_price = engine.get_ref_price()
     fair_value = ref_price * (1.0 + shift)
-    q_up = fair_value + (fair_value * vol / 12.0 * 2.5)
-    q_dn = fair_value - (fair_value * vol / 12.0 * 2.5)
+    # --- CÁLCULO DE DESVIOS IDENTICO AO MT5 ---
+    fair_value = ref_price * (1.0 + shift)
+    scalp_vol_pts = (fair_value * vol) / 12.0
+    q_up = fair_value + (scalp_vol_pts * 2.5) # Venda Scalper (Linha Sólida)
+    q_dn = fair_value - (scalp_vol_pts * 2.5) # Compra Scalper (Linha Sólida)
+    
+    daily_vol_pts = fair_value * vol
+    m_up = fair_value + (daily_vol_pts * 2.0) # Máxima Macro (Linha Pontilhada)
+    m_dn = fair_value - (daily_vol_pts * 2.0) # Mínima Macro (Linha Pontilhada)
     current_price = float(df['close'].iloc[-1])
 
     # Lógica de Execução
@@ -205,15 +217,18 @@ def main():
     else: st.info(msg)
 
     st.sidebar.title("📊 Linhas Quant (MT5)")
-    st.sidebar.error(f"Venda Scalper: {q_up:,.0f}")
+    st.sidebar.error(f"Máxima Dia: {m_up:,.0f}")
+    st.sidebar.write(f"Venda Scalper: {q_up:,.0f}")
     st.sidebar.warning(f"Preço Justo: {fair_value:,.0f}")
-    st.sidebar.success(f"Compra Scalper: {q_dn:,.0f}")
+    st.sidebar.write(f"Compra Scalper: {q_dn:,.0f}")
+    st.sidebar.success(f"Mínima Dia: {m_dn:,.0f}")
 
     time.sleep(2)
     st.rerun()
 
 if __name__ == "__main__":
     main()
+
 
 
 
