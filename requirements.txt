@@ -1,6 +1,6 @@
 streamlit
-pandas
+pandas<2.0.0
 pandas-ta
-numpy
+numpy<2.0.0
 websocket-client
-https://github.com/baselsw/tvDatafeed/archive/master.zip
+tvdatafeed @ https://github.com/baselsw/tvDatafeed/archive/refs/heads/master.zip
