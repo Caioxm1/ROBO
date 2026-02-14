@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 from tvDatafeed import TvDatafeed, Interval
 import numpy as np
+import yfinance as yf
 
 # =========================================================
 # 1. CONFIGURAÇÕES MACRO (Vindo do Sniper_Data_Feed.py)
@@ -581,4 +582,5 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
