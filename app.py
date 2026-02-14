@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf
 import pandas_ta as ta
 import time
 from datetime import datetime, timedelta
@@ -63,7 +64,7 @@ if 'sim_active' not in st.session_state:
     st.session_state.peak_price = 0.0      # Para Trailing Stop
 
 # =========================================================
-# 4. DATA FEED - BUSCA DE PREÇOS EM TEMPO REAL
+ED - BUSCA DE PREÇOS EM TEMPO REAL
 # =========================================================
 class DataEngine:
     def __init__(self):
@@ -73,6 +74,20 @@ class DataEngine:
         except Exception as e:
             st.error(f"Erro ao conectar ao DataFeed: {e}")
 
+def get_fallback_data(symbol="WIN=F"):
+    """Busca dados do Yahoo Finance caso o TradingView falhe"""
+    try:
+        # Ticker do Mini Índice (pode haver atraso de 15min)
+        data = yf.download(symbol, period="1d", interval="1m", progress=False)
+        if not data.empty:
+            # Padroniza as colunas para o seu código
+            data.columns = [col[0].lower() if isinstance(col, tuple) else col.lower() for col in data.columns]
+            return data
+    except:
+        return pd.DataFrame()
+    return pd.DataFrame()
+    
+    
     def get_market_data(self, symbol="WIN1!", exchange="BMF", interval=Interval.in_1_minute, n_bars=100):
         """Busca dados históricos e atuais do Mini Índice"""
         try:
@@ -451,19 +466,31 @@ def get_engine():
 # No arquivo app.py, localize a função main() e altere este bloco:
 
 def main():
+    # 1. INICIALIZAÇÃO DO MOTOR
     engine = DataEngine()
     
+    # Busca dados no Feed Principal (TradingView)
     df_m1 = engine.get_market_data(interval=Interval.in_1_minute, n_bars=100)
     df_m5 = engine.get_market_data(interval=Interval.in_5_minute, n_bars=50)
     macro_changes = engine.get_macro_prices()
     
-    # AJUSTE AQUI: Remova o st.rerun() automático
+    # --- AJUSTE DE SEGURANÇA: FALLBACK (Caso o TV falhe) ---
     if df_m1.empty or df_m5.empty:
-        st.error("⚠️ Não foi possível obter dados da B3 no momento.")
-        st.info("Isso geralmente ocorre por bloqueio de IP do servidor Cloud ou mercado fechado.")
-        if st.button("Tentar Conectar Novamente"):
-            st.rerun()
-        return # Interrompe a execução com segurança
+        st.warning("📡 Feed TradingView indisponível. Tentando redundância...")
+        df_m1_alt = get_fallback_data("WIN=F") 
+        
+        if not df_m1_alt.empty:
+            df_m1 = df_m1_alt
+            # Gera um M5 aproximado a partir do M1 para o robô não travar
+            df_m5 = df_m1.resample('5min').last().ffill()
+            st.success("✅ Conectado via Redundância (Yahoo Finance).")
+        else:
+            # Se a redundância também falhar, para aqui e mostra erro
+            st.error("❌ ERRO: Não foi possível obter dados de nenhuma fonte.")
+            st.info("O mercado pode estar fechado ou o IP do Cloud foi bloqueado.")
+            if st.button("🔄 Tentar Reconectar Agora"):
+                st.rerun()
+            return # Interrompe a execução com segurança para evitar erro 503
 
     # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
@@ -566,6 +593,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
