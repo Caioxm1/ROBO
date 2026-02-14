@@ -73,41 +73,38 @@ st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
 
 class DataEngine:
     def __init__(self):
-        try:
-            # Verifica se as chaves existem antes de acessar
-            if "TV_USER" in st.secrets:
-                username = st.secrets["TV_USER"]
-                password = st.secrets["TV_PASS"]
-                self.tv = TvDatafeed(username, password)
-            else:
-                st.warning("⚠️ Secrets não encontradas. Usando modo convidado.")
-                self.tv = TvDatafeed()
-        except Exception as e:
-            st.error(f"Erro na conexão: {e}")
-            self.tv = TvDatafeed()
+        # Não precisa mais de login ou TvDatafeed()
+        pass
 
-    def get_market_data(self, symbol="WIN1!", exchange="BMF", interval=Interval.in_1_minute, n_bars=100):
-        """Busca dados históricos e atuais do Mini Índice"""
+    def get_market_data(self, symbol="WIN=F", interval="1m", n_bars=100):
+        """Busca dados do Yahoo Finance (WIN=F é o ticker do Mini Índice)"""
         try:
-            data = self.tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=n_bars)
-            if data is None or data.empty:
+            # interval: '1m', '5m', '15m', '1d'
+            # period: '1d', '5d' (máximo para 1m no Yahoo é 7 dias)
+            data = yf.download(tickers=symbol, period='1d', interval=interval, progress=False)
+            
+            if data.empty:
                 return pd.DataFrame()
-            return data
-        except:
+            
+            # Padroniza nomes das colunas (Yahoo retorna Maiúsculo, o bot usa minúsculo)
+            data.columns = [col.lower() for col in data.columns]
+            return data.tail(n_bars)
+        except Exception as e:
+            st.error(f"Erro no Yahoo Finance: {e}")
             return pd.DataFrame()
 
     def get_macro_prices(self):
-        """Busca preços dos ativos correlacionados para o Macro Score"""
+        """Busca preços macro usando Yahoo Finance"""
         macro_results = {}
+        # Mapeamento: Ticker TV -> Ticker Yahoo
+        # S&P500: ^GSPC | DXY: DX-Y.NYB | Treasury: ^TNX
         for ticker in TICKERS_MACRO:
             try:
-                # Busca os últimos 2 dias para calcular a variação (Shift)
-                df = self.tv.get_hist(symbol=ticker, exchange='GLOBAL', interval=Interval.in_daily, n_bars=2)
-                if df is not None and len(df) >= 2:
-                    close_now = df['close'].iloc[-1]
-                    close_prev = df['close'].iloc[-2]
-                    pct_change = (close_now / close_prev) - 1
-                    macro_results[ticker] = pct_change
+                df = yf.download(ticker, period='2d', interval='1d', progress=False)
+                if not df.empty and len(df) >= 2:
+                    close_now = df['Close'].iloc[-1]
+                    close_prev = df['Close'].iloc[-2]
+                    macro_results[ticker] = (close_now / close_prev) - 1
             except:
                 macro_results[ticker] = 0.0
         return macro_results
@@ -589,6 +586,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
