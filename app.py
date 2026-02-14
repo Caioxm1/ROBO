@@ -4,6 +4,7 @@ import pandas_ta as ta
 import time
 from datetime import datetime
 import yfinance as yf
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Sniper AI Monitor - v8.0 Perfeito", layout="wide")
 
@@ -245,9 +246,6 @@ def main():
     time.sleep(2)
     st.rerun()
 
-# Gráfico Visual de Tensão (Opcional, mas ajuda muito)
-import plotly.graph_objects as go
-
 fig = go.Figure()
 # Preço Atual
 fig.add_trace(go.Indicator(
@@ -269,6 +267,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
+
 
 
 
