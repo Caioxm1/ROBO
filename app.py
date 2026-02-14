@@ -37,26 +37,28 @@ class DataEngine:
 
     # --- AJUSTE IDENTICO AO Sniper_Data_Feed.py ---
 def get_macro_data(self):
-    try:
-        # Baixa dados diários para calcular a Volatilidade Real do dia anterior
-        data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
-        if data.empty: return 0, 0.0, 0.0035
-        
-        df_close = data['Close'].ffill()
-        # Variação e Score
-        changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
-        shift, score = 0.0, 0
-        for t in TICKERS_MACRO:
-            val = float(changes[t])
-            impacto = val * BETAS_WIN[t]
-            shift += impacto
-            if impacto > 0.001: score += 1
-            elif impacto < -0.001: score -= 1
+        try:
+            # Baixa dados diários (D1) para Volatilidade Real
+            data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
+            if data.empty: return 0, 0.0, 0.0035
             
-        # Volatilidade Exata do S&P500
-        vol = df_close['^GSPC'].pct_change().std() 
-        return int(max(min(score, 5), -5)), shift, float(vol)
-    except: return 0, 0.0, 0.0035
+            df_close = data['Close'].ffill()
+            # Calcula Variação e Score igual ao script de alimentação
+            changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
+            shift, score = 0.0, 0
+            
+            for t in TICKERS_MACRO:
+                if t in changes.index:
+                    val = float(changes[t].iloc[0]) if hasattr(changes[t], 'iloc') else float(changes[t])
+                    impacto = val * BETAS_WIN[t]
+                    shift += impacto
+                    if impacto > 0.001: score += 1
+                    elif impacto < -0.001: score -= 1
+            
+            # Extrai a volatilidade do S&P 500 (Primeiro item da matriz)
+            vol = df_close.iloc[:,0].pct_change().std()
+            return int(max(min(score, 5), -5)), shift, float(vol)
+        except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
@@ -228,6 +230,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
