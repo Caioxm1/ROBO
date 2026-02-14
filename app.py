@@ -7,6 +7,8 @@ from tvDatafeed import TvDatafeed, Interval
 import numpy as np
 import yfinance as yf
 
+st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
+
 # =========================================================
 # 1. CONFIGURAÇÕES MACRO (Vindo do Sniper_Data_Feed.py)
 # =========================================================
@@ -587,5 +589,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
