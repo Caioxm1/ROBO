@@ -26,7 +26,7 @@ INP_STOP_POINTS  = 1500    # [cite: 21, 274]
 # 2. MOTOR DE DADOS E CÁLCULOS TÉCNICOS
 # =========================================================
 class DataEngine:
-    def get_market_data(self, symbol="BOVA11.SA", interval="1m", n_bars=100):
+    def get_market_data(self, symbol="^BVSP", interval="1m", n_bars=100):
         try:
             data = yf.download(symbol, period='7d', interval=interval, progress=False)
             if data.empty: return pd.DataFrame()
@@ -54,7 +54,7 @@ class DataEngine:
         except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
-        df = yf.download("BOVA11.SA", period="5d", interval="1d", progress=False)
+        df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
         val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
         return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 
@@ -214,6 +214,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
