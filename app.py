@@ -69,7 +69,6 @@ if 'sim_active' not in st.session_state:
 # 4. DATA FEED - BUSCA DE PREÇOS EM TEMPO REAL
 # =========================================================
 # 1. MOVA ISSO PARA O TOPO (Antes de qualquer lógica)
-st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
 
 class DataEngine:
     def get_market_data(self, symbol="^BVSP", interval="1m", n_bars=100):
@@ -156,28 +155,28 @@ def calculate_macro_score(macro_changes):
     return final_score, shift_total
 
 def compute_technical_indicators(df_m1, df_m5):
-    """Processa todos os indicadores do Sniper Ultimate"""
+    """Processa indicadores usando indexação posicional para evitar KeyError"""
     
     # --- INDICADORES M5 (TENDÊNCIA) ---
     bb_m5 = ta.bbands(df_m5['close'], length=INP_TREND_PER, std=INP_TREND_DEV)
-    df_m5['trend_mid'] = bb_m5[f'BBM_{INP_TREND_PER}_{INP_TREND_DEV}']
+    # iloc[:, 1] pega a coluna do meio (BBM) independente do nome
+    df_m5['trend_mid'] = bb_m5.iloc[:, 1] 
     
     # --- INDICADORES M1 (ENTRADA) ---
-    # Bollinger Bands M1
     bb_m1 = ta.bbands(df_m1['close'], length=INP_ENTRY_PER, std=INP_ENTRY_DEV)
-    df_m1['entry_up'] = bb_m1[f'BBU_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
-    df_m1['entry_low'] = bb_m1[f'BBL_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
-    df_m1['entry_mid'] = bb_m1[f'BBM_{INP_ENTRY_PER}_{INP_ENTRY_DEV}']
+    df_m1['entry_low'] = bb_m1.iloc[:, 0] # BBL
+    df_m1['entry_mid'] = bb_m1.iloc[:, 1] # BBM
+    df_m1['entry_up']  = bb_m1.iloc[:, 2] # BBU
     
     # RSI M1
     df_m1['rsi'] = ta.rsi(df_m1['close'], length=INP_RSI_PER)
     
-    # ATR M1 (Volatilidade para Exaustão e Stop)
+    # ATR M1
     df_m1['atr'] = ta.atr(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
     
-    # ADX M1 (Filtro de Tendência Forte)
+    # ADX M1
     adx_df = ta.adx(df_m1['high'], df_m1['low'], df_m1['close'], length=14)
-    df_m1['adx'] = adx_df['ADX_14']
+    df_m1['adx'] = adx_df.iloc[:, 0] # Coluna ADX_14
     
     return df_m1, df_m5
 
@@ -400,7 +399,6 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
     """Renderiza o painel estilo HUD para visualização mobile"""
     
     # Configuração de Página para Celular
-    st.set_page_config(page_title="Sniper AI Monitor", layout="centered")
     
     # Título Principal
     st.markdown(f"<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - NARRADOR v8.0</h2>", unsafe_content_type=True)
@@ -604,6 +602,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
