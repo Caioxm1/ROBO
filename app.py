@@ -14,14 +14,14 @@ st.set_page_config(page_title="Sniper AI Monitor - v8.0 Perfeito", layout="wide"
 BETAS_WIN = {'^GSPC': 1.2, 'USDBRL=X': -1.0, 'USDMXN=X': -0.5, '^TNX': -0.4, 'EWZ': 1.0}
 TICKERS_MACRO = list(BETAS_WIN.keys())
 
-INP_WAIT_CANDLES = 1       # [cite: 18, 193]
-INP_BAND_BUFFER  = 10      # [cite: 14, 187]
-INP_BREAKOUT     = 20      # [cite: 15, 186]
-INP_RSI_UPPER    = 70      # [cite: 17, 152]
-INP_RSI_LOWER    = 30      # [cite: 18, 168]
-INP_ADX_LEVEL    = 35      # [cite: 35, 154]
-INP_TAKE_POINTS  = 300     # [cite: 22, 255]
-INP_STOP_POINTS  = 1500    # [cite: 21, 274]
+INP_WAIT_CANDLES = 1       
+INP_BAND_BUFFER  = 10      
+INP_BREAKOUT     = 20      
+INP_RSI_UPPER    = 70     
+INP_RSI_LOWER    = 30     
+INP_ADX_LEVEL    = 35      
+INP_TAKE_POINTS  = 300     
+INP_STOP_POINTS  = 1500   
 
 # =========================================================
 # 2. MOTOR DE DADOS E CÁLCULOS TÉCNICOS
@@ -67,7 +67,7 @@ class DataEngine:
         # Ajuste "Blindado" para garantir o retorno de um número puro:
         return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 def get_zscore(df):
-    """Calcula a tensão do preço igual ao GetCurrentZScore do MT5 [cite: 451-455]"""
+    """Calcula a tensão do preço igual ao GetCurrentZScore do MT5"""
     last = df.iloc[-1]
     std_puro = (last['bb_up'] - last['bb_mid']) / 2.5
     if std_puro == 0: return 0
@@ -88,7 +88,7 @@ def manage_active_trade(price, df):
     
     # --- LOGICA DE PARCIAL (Sincronizada com MT5) ---
     if not s.partial_done and dist_pts >= 50: # 
-        # Fecha metade (1 lote) e move para Break-Even +10 [cite: 26, 294]
+        # Fecha metade (1 lote) e move para Break-Even +10 
         s.current_lots -= 1.0 
         s.partial_done = True
         s.total_points += (50 * (1.0 / s.initial_lots)) # Salva o lucro da parcial 
@@ -130,7 +130,7 @@ def get_narrator_message(price, df, score, fair_value):
     prev = df.iloc[-2]
     rsi = last['rsi']
     
-    # Cálculo de Força da Vela (idêntico ao MQL5) [cite: 138, 230]
+    # Cálculo de Força da Vela (idêntico ao MQL5)
     body_last = abs(last['close'] - last['open'])
     body_prev = abs(prev['close'] - prev['open'])
     is_power_candle = body_last >= (body_prev * 0.5) 
@@ -143,17 +143,17 @@ def get_narrator_message(price, df, score, fair_value):
     # CHECK-LIST DE COMPRA
     if st.session_state.pending_side == 1: 
         if rsi <= 30: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Frio)" 
-        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão." [cite: 171]
-        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo +2)." [cite: 172]
-        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." [cite: 173]
+        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão."
+        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo +2)."
+        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." 
         return "🔥 DISPARANDO COMPRA AGORA!!!"
     
     # CHECK-LIST DE VENDA
     if st.session_state.pending_side == -1: 
         if rsi >= 70: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Quente)" 
-        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão." [cite: 157]
-        if score > -2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo -2)." [cite: 159]
-        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." [cite: 161]
+        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão." 
+        if score > -2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo -2)." 
+        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." 
         return "🔥 DISPARANDO VENDA AGORA!!!"
 
 # =========================================================
@@ -181,7 +181,7 @@ def main():
     ref_price = engine.get_ref_price()
     fair_value = ref_price * (1.0 + shift)
     
-    # Desvio Scalper (Entradas - Linhas Sólidas) [cite: 566-567]
+    # Desvio Scalper (Entradas - Linhas Sólidas) 
     scalp_vol_pts = (fair_value * vol) / 12.0
     q_up = fair_value + (scalp_vol_pts * 2.5) 
     q_dn = fair_value - (scalp_vol_pts * 2.5) 
@@ -271,6 +271,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
