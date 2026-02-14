@@ -231,12 +231,34 @@ def main():
     c4.metric("PONTOS HOJE", f"{int(st.session_state.total_points)} pts")
 
     st.divider()
+    
+   # 1. Gráfico de Tensão (AGORA DENTRO DO MAIN)
+    fig = go.Figure()
+    fig.add_trace(go.Indicator(
+        mode = "gauge+number",
+        value = current_price,
+        title = {'text': "Preço vs Bandas Quant"},
+        gauge = {
+            'axis': {'range': [m_dn, m_up]},
+            'bar': {'color': "gold"},
+            'steps' : [
+                {'range': [m_dn, q_dn], 'color': "rgba(0, 255, 0, 0.2)"},
+                {'range': [q_up, m_up], 'color': "rgba(255, 0, 0, 0.2)"}
+            ],
+            'threshold': {'line': {'color': "white", 'width': 4}, 'value': fair_value}
+        }
+    ))
+    fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 2. Mensagem do Narrador
     st.subheader("O QUE FALTA?")
     msg = get_narrator_message(current_price, df, score, fair_value)
     if "⛔" in msg or "✋" in msg: st.warning(msg)
     elif "🔥" in msg: st.error(msg)
     else: st.info(msg)
 
+    # 3. Sidebar e Rerun
     st.sidebar.title("📊 Linhas Quant (MT5)")
     st.sidebar.error(f"Máxima Macro: {m_up:,.0f}")
     st.sidebar.write(f"Venda Scalper: {q_up:,.0f}")
@@ -246,25 +268,6 @@ def main():
 
     time.sleep(2)
     st.rerun()
-
-fig = go.Figure()
-# Preço Atual
-fig.add_trace(go.Indicator(
-    mode = "gauge+number",
-    value = current_price,
-    title = {'text': "Preço vs Bandas Quant"},
-    gauge = {
-        'axis': {'range': [m_dn, m_up]},
-        'bar': {'color': "gold"},
-        'steps' : [
-            {'range': [m_dn, q_dn], 'color': "rgba(0, 255, 0, 0.2)"},
-            {'range': [q_up, m_up], 'color': "rgba(255, 0, 0, 0.2)"}
-        ],
-        'threshold': {'line': {'color': "white", 'width': 4}, 'value': fair_value}
-    }
-))
-fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
-st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
