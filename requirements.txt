@@ -5,3 +5,4 @@ numpy
 websocket-client
 selenium
 yfinance
+plotly
