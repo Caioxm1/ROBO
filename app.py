@@ -23,28 +23,27 @@ TICKERS_MACRO = list(BETAS_WIN.keys())
 # =========================================================
 # 2. INPUTS DO SISTEMA (Espelhados do WIN.txt)
 # =========================================================
-# Configurações de Estratégia
-[cite_start]INP_TREND_TF    = "5m"      # Timeframe de Tendência (M5)
-[cite_start]INP_TREND_PER   = 20        # Período Bollinger M5
-[cite_start]INP_TREND_DEV   = 2.0       # Desvio Bollinger M5
+INP_TREND_TF    = "5m"      # Timeframe de Tendência (M5)
+INP_TREND_PER   = 20        # Período Bollinger M5
+INP_TREND_DEV   = 2.0       # Desvio Bollinger M5
 
-[cite_start]INP_ENTRY_TF    = "1m"      # Timeframe de Entrada (M1)
-[cite_start]INP_ENTRY_PER   = 20        # Período Bollinger M1
-[cite_start]INP_ENTRY_DEV   = 2.5       # Desvio Bollinger M1
-[cite_start]INP_BAND_BUFFER = 10        # Buffer para antecipar toque
-[cite_start]INP_BREAKOUT    = 20        # Gordura de rompimento
+INP_ENTRY_TF    = "1m"      # Timeframe de Entrada (M1)
+INP_ENTRY_PER   = 20        # Período Bollinger M1
+INP_ENTRY_DEV   = 2.5       # Desvio Bollinger M1
+INP_BAND_BUFFER = 10        # Buffer para antecipar toque
+INP_BREAKOUT    = 20        # Gordura de rompimento
 
-[cite_start]INP_RSI_PER     = 14        # Período RSI
-[cite_start]INP_RSI_UPPER   = 70        # Nível de Venda
-[cite_start]INP_RSI_LOWER   = 30        # Nível de Compra
+INP_RSI_PER     = 14        # Período RSI
+INP_RSI_UPPER   = 70        # Nível de Venda
+INP_RSI_LOWER   = 30        # Nível de Compra
 
-[cite_start]INP_STOP_POINTS = 1500      # Stop Loss em pontos
-[cite_start]INP_TAKE_POINTS = 1000      # Take Profit em pontos
-[cite_start]INP_WAIT_CANDLES = 1        # Velas de espera (Sniper Logic) 
+INP_STOP_POINTS = 1500      # Stop Loss em pontos
+INP_TAKE_POINTS = 1000      # Take Profit em pontos
+INP_WAIT_CANDLES = 1        # Velas de espera (Sniper Logic) 
 
 # Configurações de Integração Macro
-[cite_start]INP_USE_MACRO_FILTER = True # Filtro S&P500/Dólar
-[cite_start]INP_MIN_SCORE_TRADE  = 2    # Score mínimo para operar
+INP_USE_MACRO_FILTER = True # Filtro S&P500/Dólar
+INP_MIN_SCORE_TRADE  = 2    # Score mínimo para operar
 
 # =========================================================
 # 3. GERENCIAMENTO DE ESTADO (SIMULADOR)
