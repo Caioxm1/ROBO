@@ -71,7 +71,7 @@ if 'sim_active' not in st.session_state:
 # 1. MOVA ISSO PARA O TOPO (Antes de qualquer lógica)
 
 class DataEngine:
-    def get_market_data(self, symbol="^BVSP", interval="1m", n_bars=100):
+    def get_market_data(self, symbol="BOVA11.SA", interval="1m", n_bars=100):
         """Busca dados do Yahoo Finance com tratamento de MultiIndex"""
         try:
             search_period = '7d' if interval in ['1m', '5m'] else '1mo'
@@ -86,9 +86,9 @@ class DataEngine:
             )
             
             if data.empty:
-                # Se falhar com ^BVSP, tenta automaticamente o Índice Bovespa
-                if symbol != "^BVSP":
-                    return self.get_market_data(symbol="^BVSP", interval=interval, n_bars=n_bars)
+                # Se falhar com BOVA11.SA, tenta automaticamente o Índice Bovespa
+                if symbol != "BOVA11.SA":
+                    return self.get_market_data(symbol="BOVA11.SA", interval=interval, n_bars=n_bars)
                 return pd.DataFrame()
 
             # --- CORREÇÃO DO ERRO DE TUPLE ---
@@ -401,7 +401,7 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
     # Configuração de Página para Celular
     
     # Título Principal
-    st.markdown(f"<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - NARRADOR v8.0</h2>", unsafe_content_type=True)
+    st.markdown(f"<h2 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - NARRADOR v8.0</h2>", unsafe_allow_html=True)
     
     # --- LINHA 1: MÉTRICAS PRINCIPAIS (HUD) ---
     col1, col2 = st.columns(2)
@@ -440,7 +440,7 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
     
     with c_pnl:
         pnl_color = "green" if st.session_state.total_points >= 0 else "red"
-        st.markdown(f"**RESULTADO:** <span style='color:{pnl_color}; font-size:20px;'>R$ {st.session_state.total_points * 0.20:.2f}</span>", unsafe_content_type=True)
+        st.markdown(f"**TOTAL PONTOS:** <span style='color:cyan; font-size:20px;'>{int(st.session_state.total_points)} pts</span>", unsafe_allow_html=True)
     
     with c_pts:
         st.markdown(f"**TOTAL PONTOS:** <span style='color:cyan; font-size:20px;'>{int(st.session_state.total_points)} pts</span>", unsafe_content_type=True)
@@ -481,15 +481,15 @@ def main():
     engine = DataEngine()
     
     # 2. Correção de tipos: Passando strings diretas para evitar o erro de 'Interval'
-    df_m1 = engine.get_market_data(symbol="^BVSP", interval="1m", n_bars=100)
-    df_m5 = engine.get_market_data(symbol="^BVSP", interval="5m", n_bars=50)
+    df_m1 = engine.get_market_data(symbol="BOVA11.SA", interval="1m", n_bars=100)
+    df_m5 = engine.get_market_data(symbol="BOVA11.SA", interval="5m", n_bars=50)
     macro_changes = engine.get_macro_prices()
     
     # --- AJUSTE DE SEGURANÇA: FALLBACK ---
     if df_m1.empty or df_m5.empty:
         st.warning("📡 Feed Principal indisponível. Tentando redundância...")
         # Agora a função existe!
-        df_m1_alt = get_fallback_data("^BVSP") 
+        df_m1_alt = get_fallback_data("BOVA11.SA") 
         
         if not df_m1_alt.empty:
             df_m1 = df_m1_alt
@@ -602,6 +602,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
