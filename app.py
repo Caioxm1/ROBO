@@ -31,7 +31,6 @@ class DataEngine:
             data = yf.download(symbol, period='7d', interval=interval, progress=False)
             if data.empty: return pd.DataFrame()
             
-            # BLINDAGEM: Remove o MultiIndex que causa o erro de Series
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
             
@@ -40,38 +39,42 @@ class DataEngine:
         except: return pd.DataFrame()
 
     def get_macro_and_vol(self):
-        """Calcula Score e Shift igual ao Sniper_Data_Feed.py"""
+        """Calcula Score e Volatilidade com extração escalar (.item())"""
         try:
             data = yf.download(TICKERS_MACRO, period="2d", interval="1m", progress=False)
             if not data.empty:
                 df_close = data['Close'].ffill()
-                last_row = df_close.iloc[-1]
-                prev_row = df_close.iloc[-2]
+                # .iloc[-1] e .iloc[-2] podem retornar Series, usamos .item() para extrair o valor único
+                changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
                 
-                changes = (last_row / prev_row) - 1
                 shift_total = 0.0
                 score = 0
-                
                 for t in TICKERS_MACRO:
                     if t in changes.index:
-                        # Forçamos float para evitar erro de Series Ambiguous
-                        val_change = float(changes[t])
+                        # O segredo para não ter erro é o .item() ou .iloc[0]
+                        val_change = float(changes[t].item()) if hasattr(changes[t], 'item') else float(changes[t])
                         impacto = val_change * BETAS_WIN[t]
                         shift_total += impacto
                         if impacto > 0.001: score += 1
                         elif impacto < -0.001: score -= 1
                 
-                vol = float(df_close.iloc[:,0].pct_change().std())
-                return int(max(min(score, 5), -5)), shift_total, vol
+                # Cálculo da Volatilidade Diária (Base 252 dias para as bandas não colapsarem)
+                vol = df_close.iloc[:,0].pct_change().std() * (252**0.5) 
+                # Se vol for nan ou 0, usamos o padrão do MT5
+                final_vol = float(vol.item()) if (not pd.isna(vol) and vol > 0) else 0.0035
+                
+                return int(max(min(score, 5), -5)), shift_total, final_vol
         except: pass
         return 0, 0.0, 0.0035
 
     def get_prev_day_close(self, symbol="BOVA11.SA"):
-        """Busca o refPrice (Fechamento D1, 1)"""
+        """Extrai o preço de fechamento como um escalar puro"""
         df = yf.download(symbol, period="5d", interval="1d", progress=False)
         if len(df) >= 2:
-            return float(df['Close'].iloc[-2])
-        return float(df['Close'].iloc[-1])
+            val = df['Close'].iloc[-2]
+            return float(val.item()) if hasattr(val, 'item') else float(val)
+        val = df['Close'].iloc[-1]
+        return float(val.item()) if hasattr(val, 'item') else float(val)
 
 # =========================================================
 # 3. GESTÃO DE ESTADO
@@ -192,4 +195,5 @@ def manage_active_trade(price):
 
 if __name__ == "__main__":
     main()
+
 
