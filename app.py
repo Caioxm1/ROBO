@@ -114,8 +114,9 @@ if 'sim_active' not in st.session_state:
     st.session_state.update({
         'sim_active': False, 'total_points': 0.0, 'wins': 0, 'losses': 0,
         'pending_side': 0, 'wait_counter': 0, 'is_macro_trade': False,
-        'initial_lots': 2.0, 'current_lots': 2.0, 'partial_done': False, # [cite: 20, 343]
-        'peak_price': 0.0, 'sl_price': 0.0, 'tp_price': 0.0, 'open_price': 0.0, 'sim_side': 0
+        'initial_lots': 2.0, 'current_lots': 2.0, 'partial_done': False,
+        'peak_price': 0.0, 'sl_price': 0.0, 'tp_price': 0.0, 'open_price': 0.0, 'sim_side': 0,
+        'trades_history': [] # <-- Adicione esta linha para evitar erro
     })
 
 def get_narrator_message(price, df, score, fair_value):
@@ -267,6 +268,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
+
 
 
 
