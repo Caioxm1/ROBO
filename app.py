@@ -35,6 +35,14 @@ class DataEngine:
             return data.tail(n_bars)
         except: return pd.DataFrame()
 
+def get_zscore(df):
+    """Calcula a tensão do preço igual ao GetCurrentZScore do MT5"""
+    last = df.iloc[-1]
+    # No MT5 usamos Desvio 2.5 para achar o desvio padrão puro
+    std_puro = (last['bb_up'] - last['bb_mid']) / 2.5
+    if std_puro == 0: return 0
+    return (last['close'] - last['bb_mid']) / std_puro
+    
     def get_macro_data(self):
         try:
             data = yf.download(TICKERS_MACRO, period="2d", interval="1m", progress=False)
@@ -65,7 +73,8 @@ if 'sim_active' not in st.session_state:
     st.session_state.update({
         'sim_active': False, 'trades_history': [], 'total_points': 0.0,
         'wins': 0, 'losses': 0, 'pending_side': 0, 'wait_counter': 0,
-        'trigger_price': 0.0, 'partial_done': False, 'current_lots': 2.0
+        'trigger_price': 0.0, 'partial_done': False, 'current_lots': 2.0,
+        'peak_price': 0.0, 'sl_price': 0.0, 'tp_price': 0.0  # Adicionadas [cite: 80]
     })
 
 # =========================================================
@@ -73,6 +82,7 @@ if 'sim_active' not in st.session_state:
 # =========================================================
 def get_narrator_message(price, df, score, fair_value):
     if st.session_state.sim_active:
+    manage_active_trade(current_price, df)
         return "🚀 POSIÇÃO ABERTA: Monitorando Alvo/Stop."
     
     if st.session_state.pending_side == 0:
@@ -98,6 +108,41 @@ def get_narrator_message(price, df, score, fair_value):
         if dist_fair < 180: return f"⛔ BLOQUEIO MÉDIA: Muito perto do Preço Justo." # [cite: 161, 242]
         return "🔥 DISPARANDO VENDA AGORA!!!" # [cite: 162]
 
+def manage_active_trade(price, df):
+    s = st.session_state
+    side = s.sim_side  # 1 p/ Compra, -1 p/ Venda
+    entry = s.open_price
+    
+    # 1. Atualiza o Pico (Peak Price) [cite: 311, 467]
+    if side == 1: s.peak_price = max(s.peak_price, price)
+    else: s.peak_price = min(s.peak_price, price)
+    
+    dist_pts = abs(s.peak_price - entry)
+    z = get_zscore(df)
+    
+    # 2. FASES DO TRAILING (Gatilhos do MT5: 60, 100, 150) [cite: 313, 458]
+    if 60 <= dist_pts < 100: # FASE A: Proteção Zero (BE + 10 pts) [cite: 319, 482]
+        be = entry + 10 if side == 1 else entry - 10
+        if (side == 1 and s.sl_price < be) or (side == -1 and s.sl_price > be): s.sl_price = be
+
+    elif 100 <= dist_pts < 150: # FASE B: Elástico (Gap 100/Min 50) [cite: 322, 484]
+        if side == 1: s.sl_price = max(s.peak_price - 100, entry + 50)
+        else: s.sl_price = min(s.peak_price + 100, entry - 50)
+
+    elif dist_pts >= 150: # FASE C: Tendência (Trailing 60 ou 130 pts) [cite: 327, 491]
+        gap = 130 if abs(z) > 3.0 else 60
+        if side == 1: s.sl_price = max(s.sl_price, s.peak_price - gap)
+        else: s.sl_price = min(s.sl_price, s.peak_price + gap)
+
+    # 3. VERIFICA SAÍDA FINAL [cite: 352, 356]
+    points = (price - entry) if side == 1 else (entry - price)
+    if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
+       (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
+        s.total_points += points
+        if points > 0: s.wins += 1; s.last_profit_time = time.time()
+        else: s.losses += 1
+        s.sim_active = False
+
 # =========================================================
 # 5. EXECUÇÃO PRINCIPAL
 # =========================================================
@@ -109,7 +154,10 @@ def main():
     # Indicadores
     df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
     df['adx'] = ta.adx(df['high'], df['low'], df['close'])['ADX_14'].fillna(20)
-    
+    bb = ta.bands(df['close'], length=20, std=2.5) # [cite: 13, 83]
+    df['bb_mid'] = bb['BBM_20_2.5']
+    df['bb_up']  = bb['BBU_20_2.5']
+
     score, shift, vol = engine.get_macro_data()
     ref_price = engine.get_ref_price()
     fair_value = ref_price * (1.0 + shift)
@@ -168,3 +216,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
