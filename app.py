@@ -98,10 +98,17 @@ def manage_active_trade(price, df):
         if side == 1: s.sl_price = max(s.sl_price, s.peak_price - gap)
         else: s.sl_price = min(s.sl_price, s.peak_price + gap)
 
+    # Substitua o final da função manage_active_trade por este:
+    # Saída Final [cite: 356]
     points = (price - entry) if side == 1 else (entry - price)
+    
     if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
        (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
-        s.total_points += points
+        
+        # Cálculo Ponderado (idêntico ao MT5: pontos * peso do lote) 
+        weight = s.current_lots / s.initial_lots
+        s.total_points += (points * weight)
+        
         if points > 0: s.wins += 1
         else: s.losses += 1
         s.sim_active = False
@@ -183,10 +190,15 @@ def main():
             st.session_state.wait_counter -= 1
         elif st.session_state.pending_side != 0:
             msg = get_narrator_message(current_price, df, score, fair_value)
+            # Substitua o trecho de abertura de trade (aprox. linha 143) por este:
             if "DISPARANDO" in msg:
                 st.session_state.update({
-                    'sim_active': True, 'sim_side': st.session_state.pending_side,
-                    'open_price': current_price, 'peak_price': current_price,
+                    'sim_active': True, 
+                    'sim_side': st.session_state.pending_side,
+                    'open_price': current_price, 
+                    'peak_price': current_price,
+                    'initial_lots': 2.0, # Sincronizado com InpLots do WIN.txt [cite: 20]
+                    'current_lots': 2.0,
                     'sl_price': current_price - 1500 if st.session_state.pending_side == 1 else current_price + 1500,
                     'tp_price': current_price + 300 if st.session_state.pending_side == 1 else current_price - 300
                 })
@@ -220,4 +232,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
