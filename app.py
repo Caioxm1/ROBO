@@ -492,16 +492,16 @@ def main():
                 st.rerun()
             return # Interrompe a execução com segurança para evitar erro 503
 
-    # 2. PROCESSAMENTO TÉCNICO
+    # 2. PROCESSAMENTO TÉCNICO (Cálculo de Indicadores)
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
     macro_score, shift = calculate_macro_score(macro_changes)
     
     # Preços atuais para o Simulador 
     current_bid = df_m1['close'].iloc[-1]
-    current_ask = current_bid + 5 # Simulação de Spread fixo (5 pts)
+    current_ask = current_bid + 5 # Spread simulado
     
-    # Cálculo do Preço Justo (Fair Value / Quant)
-    ref_price = df_m5['close'].iloc[-1] # Simplificado para o fechamento anterior
+    # Cálculo do Preço Justo (Quant)
+    ref_price = df_m5['close'].iloc[-1] 
     fair_value = ref_price * (1.0 + shift)
     
     # 3. GESTÃO DE TRADES ATIVOS (Verifica SL/TP e Trailing)
@@ -510,10 +510,8 @@ def main():
         sl = st.session_state.sl_price
         tp = st.session_state.tp_price
         
-        # Gerencia Trailing Stop
         manage_smart_trailing(current_bid, current_ask, df_m1)
         
-        # Verifica saída por Stop ou Take
         if side == 1: # Compra
             if current_bid >= tp: close_sim_trade(tp, "Take Profit")
             elif current_bid <= sl: close_sim_trade(sl, "Stop Loss")
@@ -521,71 +519,43 @@ def main():
             if current_ask <= tp: close_sim_trade(tp, "Take Profit")
             elif current_ask >= sl: close_sim_trade(sl, "Stop Loss")
 
-    # 4. MONITORAMENTO DE NOVAS ENTRADAS
+    # 4. MONITORAMENTO DE NOVAS ENTRADAS (Lógica Sniper)
     else:
         last_row = df_m1.iloc[-1]
         
-        # FASE 1: Busca de Toque nas Bandas Quant/Bollinger 
         if st.session_state.pending_side == 0:
             buffer = INP_BAND_BUFFER
             if current_ask <= (last_row['entry_low'] + buffer):
                 st.session_state.pending_side = 1
                 st.session_state.wait_counter = INP_WAIT_CANDLES
-                # Reentrada Inteligente (Reduz espera se houve lucro recente) 
-                if st.session_state.last_profit_time and (datetime.now() - st.session_state.last_profit_time).seconds < 600:
-                    st.session_state.wait_counter = 2
-            
             elif current_bid >= (last_row['entry_up'] - buffer):
                 st.session_state.pending_side = -1
                 st.session_state.wait_counter = INP_WAIT_CANDLES
-                if st.session_state.last_profit_time and (datetime.now() - st.session_state.last_profit_time).seconds < 600:
-                    st.session_state.wait_counter = 2
-
-        # FASE 2: Gestão do Gatilho e Exaustão
         else:
-            # Verifica se o preço já atingiu o alvo antes da entrada (Proteção Quant)
-            if (st.session_state.pending_side == 1 and current_bid >= fair_value) or \
-               (st.session_state.pending_side == -1 and current_ask <= fair_value):
-                st.session_state.pending_side = 0
-                st.session_state.trigger_price = 0
-            
-            # Filtro de Exaustão 
             is_exhausted = check_exhaustion_filter(current_bid, df_m1)
-            
             if not is_exhausted:
-                # Define Gatilho no fechamento da última vela
+                # Gatilho de rompimento
                 h1, l1 = df_m1['high'].iloc[-2], df_m1['low'].iloc[-2]
                 pad = INP_BREAKOUT
                 
-                if st.session_state.pending_side == 1: # Compra
-                    st.session_state.trigger_price = h1 + pad
-                else: # Venda
-                    st.session_state.trigger_price = l1 - pad
+                if st.session_state.pending_side == 1: st.session_state.trigger_price = h1 + pad
+                else: st.session_state.trigger_price = l1 - pad
                 
-                # FASE 3: Disparo da Ordem (Verifica checklist do Narrador) 
                 msg = get_narrator_message(current_bid, df_m1, macro_score, fair_value)
                 if "DISPARANDO" in msg:
-                    # Define Stop e Take baseados na volatilidade atual
                     atr_pts = last_row['atr']
                     sl_dist = max(atr_pts * 2.5, 150)
                     
                     if st.session_state.pending_side == 1:
-                        sl = current_bid - sl_dist
-                        tp = current_bid + INP_TAKE_POINTS
-                        # Se for Modo Macro, alvo é no Preço Justo
-                        if abs(macro_score) >= 3: tp = fair_value
-                        open_sim_trade(1, current_ask, sl, tp, is_macro=(abs(macro_score) >= 3))
+                        open_sim_trade(1, current_ask, current_bid - sl_dist, current_bid + INP_TAKE_POINTS)
                     else:
-                        sl = current_ask + sl_dist
-                        tp = current_ask - INP_TAKE_POINTS
-                        if abs(macro_score) >= 3: tp = fair_value
-                        open_sim_trade(-1, current_bid, sl, tp, is_macro=(abs(macro_score) >= 3))
+                        open_sim_trade(-1, current_bid, current_ask + sl_dist, current_ask - INP_TAKE_POINTS)
 
     # 5. ATUALIZAÇÃO DO DASHBOARD
     narrator_msg = get_narrator_message(current_bid, df_m1, macro_score, fair_value)
     render_dashboard(current_bid, macro_score, shift, df_m1, narrator_msg)
 
-    # 6. LOOP INFINITO (Auto-Refresh a cada 2 segundos)
+    # 6. LOOP DE ATUALIZAÇÃO
     time.sleep(2)
     st.rerun()
 
@@ -593,6 +563,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
 
