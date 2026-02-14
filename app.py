@@ -125,19 +125,33 @@ def get_narrator_message(price, df, score, fair_value):
         return "💤 MEIO DE CAMPO. Aguardando toque nas extremidades Quant."
 
     last = df.iloc[-1]
+    prev = df.iloc[-2]
     rsi = last['rsi']
+    
+    # Cálculo de Força da Vela (idêntico ao MQL5) [cite: 138, 230]
+    body_last = abs(last['close'] - last['open'])
+    body_prev = abs(prev['close'] - prev['open'])
+    is_power_candle = body_last >= (body_prev * 0.5) 
+    
+    dist_fair = abs(price - fair_value)
 
     if st.session_state.wait_counter > 0:
         return f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} velas para autorizar." 
     
+    # CHECK-LIST DE COMPRA
     if st.session_state.pending_side == 1: 
-        if rsi <= INP_RSI_LOWER: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Abaixo de 30)" 
-        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente." 
+        if rsi <= 30: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Frio)" 
+        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão." [cite: 171]
+        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo +2)." [cite: 172]
+        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." [cite: 173]
         return "🔥 DISPARANDO COMPRA AGORA!!!"
     
+    # CHECK-LIST DE VENDA
     if st.session_state.pending_side == -1: 
-        if rsi >= INP_RSI_UPPER: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Acima de 70)" 
-        if score > -2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente." 
+        if rsi >= 70: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Quente)" 
+        if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão." [cite: 157]
+        if score > -2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo -2)." [cite: 159]
+        if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." [cite: 161]
         return "🔥 DISPARANDO VENDA AGORA!!!"
 
 # =========================================================
@@ -231,8 +245,31 @@ def main():
     time.sleep(2)
     st.rerun()
 
+# Gráfico Visual de Tensão (Opcional, mas ajuda muito)
+import plotly.graph_objects as go
+
+fig = go.Figure()
+# Preço Atual
+fig.add_trace(go.Indicator(
+    mode = "gauge+number",
+    value = current_price,
+    title = {'text': "Preço vs Bandas Quant"},
+    gauge = {
+        'axis': {'range': [m_dn, m_up]},
+        'bar': {'color': "gold"},
+        'steps' : [
+            {'range': [m_dn, q_dn], 'color': "rgba(0, 255, 0, 0.2)"},
+            {'range': [q_up, m_up], 'color': "rgba(255, 0, 0, 0.2)"}
+        ],
+        'threshold': {'line': {'color': "white", 'width': 4}, 'value': fair_value}
+    }
+))
+fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+st.plotly_chart(fig, use_container_width=True)
+
 if __name__ == "__main__":
     main()
+
 
 
 
