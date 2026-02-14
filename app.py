@@ -445,6 +445,10 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
 # 11. MOTOR DE EXECUÇÃO - LÓGICA DE DECISÃO (ONTICK)
 # =========================================================
 
+@st.cache_resource
+def get_engine():
+    return DataEngine()
+
 def main():
     # Inicializa o motor de dados
     engine = DataEngine()
@@ -559,4 +563,5 @@ def main():
 
 # --- INICIALIZAÇÃO DO SCRIPT ---
 if __name__ == "__main__":
+
     main()
