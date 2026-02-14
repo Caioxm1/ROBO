@@ -35,15 +35,14 @@ class DataEngine:
             return data.tail(n_bars)
         except: return pd.DataFrame()
 
-    # --- AJUSTE IDENTICO AO Sniper_Data_Feed.py ---
-def get_macro_data(self):
+    def get_macro_data(self):
+        """Sincronizado com Sniper_Data_Feed.py"""
         try:
-            # Baixa dados diários (D1) para Volatilidade Real
+            # Dados diários para Volatilidade Real
             data = yf.download(TICKERS_MACRO, period="5d", interval="1d", progress=False)
             if data.empty: return 0, 0.0, 0.0035
             
             df_close = data['Close'].ffill()
-            # Calcula Variação e Score igual ao script de alimentação
             changes = (df_close.iloc[-1] / df_close.iloc[-2]) - 1
             shift, score = 0.0, 0
             
@@ -55,18 +54,19 @@ def get_macro_data(self):
                     if impacto > 0.001: score += 1
                     elif impacto < -0.001: score -= 1
             
-            # Extrai a volatilidade do S&P 500 (Primeiro item da matriz)
+            # Volatilidade do S&P 500
             vol = df_close.iloc[:,0].pct_change().std()
             return int(max(min(score, 5), -5)), shift, float(vol)
         except: return 0, 0.0, 0.0035
 
     def get_ref_price(self):
+        """Busca o refPrice (Fechamento anterior) [cite: 556]"""
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
         val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
         return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 
 def get_zscore(df):
-    """Calcula a tensão do preço igual ao GetCurrentZScore do MT5"""
+    """Calcula a tensão do preço igual ao GetCurrentZScore do MT5 [cite: 451-455]"""
     last = df.iloc[-1]
     std_puro = (last['bb_up'] - last['bb_mid']) / 2.5
     if std_puro == 0: return 0
@@ -76,7 +76,7 @@ def get_zscore(df):
 # 3. GESTÃO DE TRADE (TRAILING E PLACAR)
 # =========================================================
 def manage_active_trade(price, df):
-    """Trailing Stop Elástico de 3 Fases"""
+    """Trailing Stop Elástico de 3 Fases [cite: 313-332, 458-491]"""
     s = st.session_state
     side = s.sim_side  
     entry = s.open_price
@@ -87,23 +87,23 @@ def manage_active_trade(price, df):
     dist_pts = abs(s.peak_price - entry)
     z = get_zscore(df)
     
-    # FASE A: Proteção Zero (60 pts) [cite: 319, 482]
+    # FASE 1: Proteção Zero (60 pts) [cite: 319-322, 481-484]
     if 60 <= dist_pts < 100:
         be = entry + 10 if side == 1 else entry - 10
         if (side == 1 and s.sl_price < be) or (side == -1 and s.sl_price > be): s.sl_price = be
 
-    # FASE B: Elástico (100 pts) [cite: 322, 484]
+    # FASE 2: Elástico (100 pts) [cite: 323-327, 485-490]
     elif 100 <= dist_pts < 150:
         if side == 1: s.sl_price = max(s.peak_price - 100, entry + 50)
         else: s.sl_price = min(s.peak_price + 100, entry - 50)
 
-    # FASE C: Tendência (150 pts) [cite: 327, 491]
+    # FASE 3: Tendência (150 pts) [cite: 328-332, 491-496]
     elif dist_pts >= 150:
         gap = 130 if abs(z) > 3.0 else 60
         if side == 1: s.sl_price = max(s.sl_price, s.peak_price - gap)
         else: s.sl_price = min(s.sl_price, s.peak_price + gap)
 
-    # Saída Final [cite: 356]
+    # Saída Final [cite: 352-366]
     points = (price - entry) if side == 1 else (entry - price)
     if (side == 1 and (price >= s.tp_price or price <= s.sl_price)) or \
        (side == -1 and (price <= s.tp_price or price >= s.sl_price)):
@@ -131,7 +131,6 @@ def get_narrator_message(price, df, score, fair_value):
 
     last = df.iloc[-1]
     rsi = last['rsi']
-    dist_fair = abs(price - fair_value)
 
     if st.session_state.wait_counter > 0:
         return f"✋ FILTRO TEMPO: Faltam {st.session_state.wait_counter} velas para autorizar." 
@@ -154,30 +153,27 @@ def main():
     df = engine.get_market_data()
     if df.empty: return
 
-    # Indicadores M1
+    # Indicadores
     df['rsi'] = ta.rsi(df['close'], length=14).fillna(50)
-    # --- AJUSTE POSICIONAL: EVITA ERRO DE NOME DE COLUNA ---
     bb = ta.bbands(df['close'], length=20, std=2.5)
-    
-    # Pegamos pelas posições fixas que a biblioteca sempre entrega:
-    # 0 = Low (BBL), 1 = Mid (BBM), 2 = Up (BBU)
     df['bb_low'] = bb.iloc[:, 0]
     df['bb_mid'] = bb.iloc[:, 1]
     df['bb_up']  = bb.iloc[:, 2]
-    # -------------------------------------------------------
 
     score, shift, vol = engine.get_macro_data()
     ref_price = engine.get_ref_price()
     fair_value = ref_price * (1.0 + shift)
-    # --- CÁLCULO DE DESVIOS IDENTICO AO MT5 ---
-    fair_value = ref_price * (1.0 + shift)
-    scalp_vol_pts = (fair_value * vol) / 12.0
-    q_up = fair_value + (scalp_vol_pts * 2.5) # Venda Scalper (Linha Sólida)
-    q_dn = fair_value - (scalp_vol_pts * 2.5) # Compra Scalper (Linha Sólida)
     
+    # Desvio Scalper (Entradas - Linhas Sólidas) [cite: 566-567]
+    scalp_vol_pts = (fair_value * vol) / 12.0
+    q_up = fair_value + (scalp_vol_pts * 2.5) 
+    q_dn = fair_value - (scalp_vol_pts * 2.5) 
+    
+    # Desvio Macro (Limites - Linhas Pontilhadas) [cite: 568-569]
     daily_vol_pts = fair_value * vol
-    m_up = fair_value + (daily_vol_pts * 2.0) # Máxima Macro (Linha Pontilhada)
-    m_dn = fair_value - (daily_vol_pts * 2.0) # Mínima Macro (Linha Pontilhada)
+    m_up = fair_value + (daily_vol_pts * 2.0) 
+    m_dn = fair_value - (daily_vol_pts * 2.0) 
+    
     current_price = float(df['close'].iloc[-1])
 
     # Lógica de Execução
@@ -202,7 +198,7 @@ def main():
                 })
                 st.session_state.trades_history.append({"Hora": datetime.now().strftime("%H:%M"), "Lado": "Compra" if st.session_state.pending_side == 1 else "Venda", "Preço": current_price})
 
-    # Interface Visual # [cite:: 389]
+    # Interface Visual [cite: 389-401]
     st.markdown(f"<h1 style='text-align: center; color: #FFD700;'>🎯 SNIPER AI - MONITOR v8.0</h1>", unsafe_allow_html=True)
     
     c1, c2, c3, c4 = st.columns(4)
@@ -219,20 +215,14 @@ def main():
     else: st.info(msg)
 
     st.sidebar.title("📊 Linhas Quant (MT5)")
-    st.sidebar.error(f"Máxima Dia: {m_up:,.0f}")
+    st.sidebar.error(f"Máxima Macro: {m_up:,.0f}")
     st.sidebar.write(f"Venda Scalper: {q_up:,.0f}")
     st.sidebar.warning(f"Preço Justo: {fair_value:,.0f}")
     st.sidebar.write(f"Compra Scalper: {q_dn:,.0f}")
-    st.sidebar.success(f"Mínima Dia: {m_dn:,.0f}")
+    st.sidebar.success(f"Mínima Macro: {m_dn:,.0f}")
 
     time.sleep(2)
     st.rerun()
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
