@@ -448,20 +448,22 @@ def render_dashboard(current_price, macro_score, shift, df_m1, narrator_msg):
 def get_engine():
     return DataEngine()
 
+# No arquivo app.py, localize a função main() e altere este bloco:
+
 def main():
-    # Inicializa o motor de dados
     engine = DataEngine()
     
-    # 1. BUSCA DE DADOS (M1, M5 e Macro)
     df_m1 = engine.get_market_data(interval=Interval.in_1_minute, n_bars=100)
     df_m5 = engine.get_market_data(interval=Interval.in_5_minute, n_bars=50)
     macro_changes = engine.get_macro_prices()
     
+    # AJUSTE AQUI: Remova o st.rerun() automático
     if df_m1.empty or df_m5.empty:
-        st.warning("Aguardando conexão com o feed de dados da B3...")
-        time.sleep(2)
-        st.rerun()
-        return
+        st.error("⚠️ Não foi possível obter dados da B3 no momento.")
+        st.info("Isso geralmente ocorre por bloqueio de IP do servidor Cloud ou mercado fechado.")
+        if st.button("Tentar Conectar Novamente"):
+            st.rerun()
+        return # Interrompe a execução com segurança
 
     # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
@@ -564,5 +566,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
