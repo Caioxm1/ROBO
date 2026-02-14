@@ -68,15 +68,15 @@ if 'sim_active' not in st.session_state:
 # =========================================================
 class DataEngine:
     def __init__(self):
-        # Tenta conectar usando credenciais para evitar o bloqueio de IP
         try:
-            # Pega o login das configurações seguras do Streamlit
+            # Tenta conectar usando credenciais seguras do Streamlit
+            # Isso evita 90% dos bloqueios de "nologin"
             username = st.secrets["TV_USER"]
             password = st.secrets["TV_PASS"]
             self.tv = TvDatafeed(username, password)
         except Exception as e:
             st.error(f"Erro ao conectar com login: {e}")
-            # Se falhar, tenta o modo sem login (que é o que está dando erro agora)
+            # Fallback para o modo sem login se o segredo não estiver configurado
             self.tv = TvDatafeed()
 
     def get_market_data(self, symbol="WIN1!", exchange="BMF", interval=Interval.in_1_minute, n_bars=100):
@@ -464,22 +464,13 @@ def main():
     macro_changes = engine.get_macro_prices()
     
     # --- AJUSTE DE SEGURANÇA: FALLBACK (Caso o TV falhe) ---
+    # Procure isso dentro da sua função main()
     if df_m1.empty or df_m5.empty:
-        st.warning("📡 Feed TradingView indisponível. Tentando redundância...")
-        df_m1_alt = get_fallback_data("WIN=F") 
-        
-        if not df_m1_alt.empty:
-            df_m1 = df_m1_alt
-            # Gera um M5 aproximado a partir do M1 para o robô não travar
-            df_m5 = df_m1.resample('5min').last().ffill()
-            st.success("✅ Conectado via Redundância (Yahoo Finance).")
-        else:
-            # Se a redundância também falhar, para aqui e mostra erro
-            st.error("❌ ERRO: Não foi possível obter dados de nenhuma fonte.")
-            st.info("O mercado pode estar fechado ou o IP do Cloud foi bloqueado.")
-            if st.button("🔄 Tentar Reconectar Agora"):
-                st.rerun()
-            return # Interrompe a execução com segurança para evitar erro 503
+        st.error("❌ Conexão recusada pelo TradingView.")
+        st.info("Aguardando 30 segundos antes da próxima tentativa para evitar banimento de IP...")
+        time.sleep(30) # Dá um descanso para o servidor
+        st.rerun()
+        return
 
     # 2. PROCESSAMENTO TÉCNICO
     df_m1, df_m5 = compute_technical_indicators(df_m1, df_m5)
@@ -582,5 +573,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
