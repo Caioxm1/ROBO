@@ -56,11 +56,11 @@ if 'sim_active' not in st.session_state:
     st.session_state.total_points = 0.0
     st.session_state.wins = 0
     st.session_state.losses = 0
-    [cite_start]st.session_state.pending_side = 0      # 0=Neutro, 1=Compra, -1=Venda
-    [cite_start]st.session_state.wait_counter = 0      # Contador de exaustão
-    [cite_start]st.session_state.trigger_price = 0.0   # Preço de gatilho travado
+    st.session_state.pending_side = 0      # 0=Neutro, 1=Compra, -1=Venda
+    st.session_state.wait_counter = 0      # Contador de exaustão
+    st.session_state.trigger_price = 0.0   # Preço de gatilho travado
     st.session_state.last_profit_time = None
-    [cite_start]st.session_state.peak_price = 0.0      # Para Trailing Stop
+    st.session_state.peak_price = 0.0      # Para Trailing Stop
 
 # =========================================================
 # 4. DATA FEED - BUSCA DE PREÇOS EM TEMPO REAL
@@ -564,3 +564,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
