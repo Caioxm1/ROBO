@@ -193,6 +193,10 @@ def main():
     
     current_price = float(df['close'].iloc[-1])
 
+    # === CÁLCULO DA PREVISÃO DE GAP (NOVO) ===
+    gap_pts = fair_value - current_price
+    gap_pct = (fair_value / current_price - 1)
+
     # Lógica de Execução
     if st.session_state.sim_active:
         manage_active_trade(current_price, df)
@@ -229,6 +233,17 @@ def main():
     c2.metric("SCORE MACRO", f"{score:+}", delta=f"{shift:.4f}")
     c3.metric("PLACAR (W/L)", f"{st.session_state.wins} x {st.session_state.losses}")
     c4.metric("PONTOS HOJE", f"{int(st.session_state.total_points)} pts")
+
+    # === EXIBIÇÃO DA PREVISÃO DE GAP ===
+    st.write("") # Espaçador
+    if abs(gap_pts) > 100: # Só mostra se o gap for relevante (> 100 pontos)
+        color_gap = "green" if gap_pts > 0 else "red"
+        st.markdown(f"""
+            <div style='text-align: center; padding: 10px; border-radius: 5px; border: 1px solid {color_gap}; background-color: rgba(0,0,0,0.1);'>
+                <h3 style='margin:0; color: {color_gap};'>🚀 PREVISÃO DE GAP: {gap_pts:+.0f} PONTOS</h3>
+                <p style='margin:0; opacity: 0.8;'>Estimativa baseada no Desvio Global ({gap_pct:+.2%})</p>
+            </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
     
@@ -271,6 +286,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
