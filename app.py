@@ -274,7 +274,7 @@ def main():
     else: st.info(msg)
 
     # 3. Sidebar e Rerun
-    st.sidebar.title("📊 Linhas Quant (MT5)")
+    st.sidebar.title("📊 Linhas Quant - MINI ÍNDICE")
     st.sidebar.error(f"Máxima Macro: {m_up:,.0f}")
     st.sidebar.write(f"Venda Scalper: {q_up:,.0f}")
     st.sidebar.warning(f"Preço Justo: {fair_value:,.0f}")
@@ -286,6 +286,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
