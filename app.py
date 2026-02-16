@@ -20,7 +20,7 @@ INP_BREAKOUT     = 20
 INP_RSI_UPPER    = 70     
 INP_RSI_LOWER    = 30     
 INP_ADX_LEVEL    = 35      
-INP_TAKE_POINTS  = 300     
+INP_TAKE_POINTS  = 1000     
 INP_STOP_POINTS  = 1500   
 
 # =========================================================
@@ -286,6 +286,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
