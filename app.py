@@ -63,7 +63,7 @@ class DataEngine:
     def get_ref_price(self):
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
         if df.empty: return 0.0
-        val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
+        val = df['Close'].iloc[-2] if len(df) >= 1 else df['Close'].iloc[-1]
         # Ajuste "Blindado" para garantir o retorno de um número puro:
         return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 def get_zscore(df):
@@ -286,6 +286,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
