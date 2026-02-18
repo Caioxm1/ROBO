@@ -63,7 +63,7 @@ class DataEngine:
     def get_ref_price(self):
         df = yf.download("^BVSP", period="5d", interval="1d", progress=False)
         if df.empty: return 0.0
-        val = df['Close'].iloc[-2] if len(df) >= 1 else df['Close'].iloc[-1]
+        val = df['Close'].iloc[-2] if len(df) >= 2 else df['Close'].iloc[-1]
         # Ajuste "Blindado" para garantir o retorno de um número puro:
         return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 def get_zscore(df):
@@ -144,7 +144,7 @@ def get_narrator_message(price, df, score, fair_value):
     if st.session_state.pending_side == 1: 
         if rsi <= 30: return f"⛔ BLOQUEIO RSI: {rsi:.1f} (Muito Frio)" 
         if not is_power_candle: return "⛔ BLOQUEIO VELA: Sem força de reversão."
-        if score < 2: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo +2)."
+        if score < 1: return f"⛔ BLOQUEIO MACRO: Score {score} insuficiente (Mínimo +1)."
         if dist_fair < 150: return "⛔ BLOQUEIO DISTÂNCIA: Muito perto do Preço Justo." 
         return "🔥 DISPARANDO COMPRA AGORA!!!"
     
@@ -286,6 +286,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
